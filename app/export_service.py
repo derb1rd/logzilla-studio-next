@@ -14,7 +14,13 @@ from .contract import ExportOptions
 
 def export(records: list[dict], opts: ExportOptions) -> tuple[bytes, str, str]:
     """Сериализует записи в JSON. Возвращает (payload, mime, filename_suffix)."""
-    payload = (json.dumps(records, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    try:
+        text = json.dumps(records, ensure_ascii=False, indent=2)
+        payload = (text + "\n").encode("utf-8")
+    except UnicodeEncodeError:
+        # Одиночные суррогаты (битый ввод) не кодируются в utf-8 — отступаем на
+        # ensure_ascii=True (экранирует их как \\udXXX), чтобы экспорт не падал.
+        payload = (json.dumps(records, ensure_ascii=True, indent=2) + "\n").encode("utf-8")
     mime, ext = "application/json", "json"
     if opts.gzip:
         payload = gzip.compress(payload)

@@ -40,7 +40,13 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- утилиты ответа ------------------------------------------------- #
     def _send_json(self, obj: dict, status: int = 200) -> None:
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        try:
+            body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        except UnicodeEncodeError:
+            # Одиночные суррогаты в данных (битый/двойно-экранированный ввод) не
+            # кодируются в utf-8 и иначе уронили бы весь ответ. Отступаем на
+            # ensure_ascii=True — суррогаты экранируются как \\udXXX (валидный JSON).
+            body = json.dumps(obj, ensure_ascii=True).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

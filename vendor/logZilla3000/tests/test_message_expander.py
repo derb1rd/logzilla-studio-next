@@ -32,6 +32,20 @@ class TestDecodeUnicodeEscapes(unittest.TestCase):
         result = _decode_unicode_escapes("Hello world")
         self.assertEqual(result, "Hello world")
 
+    def test_surrogate_pair_emoji_combined(self):
+        """Суррогатная пара \\uD83D\\uDE00 склеивается в эмодзи, а результат —
+        валидный Unicode (json.dumps(...).encode('utf-8') не падает)."""
+        result = _decode_unicode_escapes("say \\uD83D\\uDE00 hi")
+        self.assertEqual(result, "say 😀 hi")
+        # ключевая гарантия: строка кодируется в utf-8 без одиночных суррогатов
+        json.dumps(result, ensure_ascii=False).encode("utf-8")
+
+    def test_lone_surrogate_sanitized(self):
+        """Одиночный суррогат (битый ввод) заменяется на U+FFFD, не роняет encode."""
+        result = _decode_unicode_escapes("broken \\uD83D end")
+        json.dumps(result, ensure_ascii=False).encode("utf-8")  # не бросает
+        self.assertNotIn("\uD83D", result)
+
     def test_dict_with_unicode_escapes(self):
         """Декодирование Unicode-escape в значениях dict."""
         result = _decode_unicode_escapes({

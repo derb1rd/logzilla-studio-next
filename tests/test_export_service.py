@@ -24,3 +24,13 @@ def test_gzip_decorator():
     assert mime == "application/gzip"
     assert ext == "json.gz"
     assert json.loads(gzip.decompress(payload).decode("utf-8")) == RECORDS
+
+
+def test_lone_surrogate_does_not_crash_export():
+    """Одиночный суррогат в данных (битый ввод) не должен ронять экспорт:
+    ensure_ascii=False падает на utf-8, сервис отступает на ensure_ascii=True."""
+    records = [{"level": "INFO", "data": "\ud83d"}]   # одиночный high surrogate
+    payload, mime, ext = export(records, ExportOptions())
+    assert mime == "application/json"
+    # payload — валидный utf-8 и валидный JSON
+    assert json.loads(payload.decode("utf-8")) == records

@@ -91,6 +91,14 @@ def _decode_unicode_escapes(obj: Any) -> Any:
                     lambda m: chr(int(m.group(1), 16)),
                     obj,
                 )
+                # Не-BMP символы (эмодзи и т.п.) приходят суррогатной парой
+                # \\uD83D\\uDE00 — поэлементный chr() даёт ДВА одиночных суррогата.
+                # json.dumps(...).encode('utf-8') на одиночном суррогате падает
+                # (UnicodeEncodeError) и роняет весь ответ /api/parse. Round-trip
+                # через utf-16 склеивает пары обратно в символ (😀), а одиночные
+                # суррогаты заменяет на U+FFFD — строка гарантированно валидна.
+                if any(0xD800 <= ord(c) <= 0xDFFF for c in decoded):
+                    decoded = decoded.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
                 return decoded
         except Exception:
             logger.debug("Не удалось декодировать unicode-escape: %s...", obj[:50])
