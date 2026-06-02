@@ -3,33 +3,28 @@
 #
 # Результат: папка, которую можно «отдать» целиком. На машине получателя нужен
 # только python3 (3.10+) — никакого pip/venv/сети/Homebrew. Ядро logZilla3000 и
-# его единственная зависимость sqlparse вендорятся внутрь (vendor/).
+# его опциональная зависимость sqlparse уже лежат в vendor/ этого репозитория —
+# сборка просто копирует исходники как есть (dev-раскладка == дистрибутив).
 #
-# Сборка (на машине разработчика) требует python3 + доступ к ядру и к sqlparse
-# (через установленный пакет или pip). Дев-репозиторий не засоряется: всё кладётся
-# в dist/, копии в git не попадают.
+# Дев-репозиторий не засоряется: всё кладётся в dist/, копии в git не попадают.
 #
 # Использование:
 #   ./build_dist.sh                 # → dist/logzilla-studio
 #   ./build_dist.sh /путь/назначения
-#   LOGZILLA3000_HOME=/путь/к/ядру ./build_dist.sh
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 DIST="${1:-$HERE/dist/logzilla-studio}"
 
-# --- 1. Найти ядро --------------------------------------------------------
-CORE="${LOGZILLA3000_HOME:-$HERE/../logzilla3000-project}"
-if [ ! -f "$CORE/logZilla3000/__init__.py" ]; then
-  echo "✗ Ядро logZilla3000 не найдено: $CORE" >&2
-  echo "  Задайте путь: LOGZILLA3000_HOME=/путь/к/logzilla3000-project ./build_dist.sh" >&2
+# --- 1. Проверить наличие завендоренного ядра -----------------------------
+if [ ! -f "$HERE/vendor/logZilla3000/__init__.py" ]; then
+  echo "✗ Завендоренное ядро не найдено: $HERE/vendor/logZilla3000" >&2
+  echo "  Репозиторий повреждён — vendor/ должен содержать logZilla3000 (и sqlparse)." >&2
   exit 1
 fi
-CORE="$(cd "$CORE" && pwd)"
 
 echo "→ Сборка дистрибутива"
 echo "  studio: $HERE"
-echo "  ядро:   $CORE"
 echo "  цель:   $DIST"
 
 rm -rf "$DIST"
@@ -39,29 +34,14 @@ mkdir -p "$DIST/vendor"
 rsync -a --exclude='__pycache__' "$HERE/app" "$DIST/"
 rsync -a --exclude='__pycache__' "$HERE/web" "$DIST/"
 
-# --- 3. Ядро (копируется как есть, без тестов и кэша) ---------------------
-rsync -a --exclude='__pycache__' --exclude='tests' "$CORE/logZilla3000" "$DIST/vendor/"
-
-# --- 4. sqlparse (pure-Python, ОПЦИОНАЛЬНАЯ зависимость) ------------------
+# --- 3. vendor (ядро + sqlparse) — как есть, без тестов и кэша ------------
 # Ядро использует sqlparse лишь для «красивого» форматирования SQL и корректно
-# деградирует без него (SQL остаётся как есть). Поэтому вендоринг best-effort:
-# 1) копируем уже установленный пакет (без сети); 2) иначе пробуем pip; 3) иначе
-# просто предупреждаем — папка остаётся полностью рабочей.
-if SQLPARSE_DIR="$(python3 -c 'import os,sqlparse;print(os.path.dirname(sqlparse.__file__))' 2>/dev/null)"; then
-  echo "  sqlparse: копирую из $SQLPARSE_DIR"
-  rsync -a --exclude='__pycache__' "$SQLPARSE_DIR" "$DIST/vendor/"
-elif command -v brew >/dev/null 2>&1 && \
-     BREW_SQLPARSE="$(ls -d "$(brew --prefix sqlparse 2>/dev/null)"/libexec/lib/python*/site-packages/sqlparse 2>/dev/null | head -1)" && \
-     [ -n "$BREW_SQLPARSE" ]; then
-  echo "  sqlparse: копирую из brew ($BREW_SQLPARSE)"
-  rsync -a --exclude='__pycache__' "$BREW_SQLPARSE" "$DIST/vendor/"
-elif python3 -m pip install --quiet --target "$DIST/vendor" --no-compile "sqlparse>=0.4.0,<1.0.0" 2>/dev/null; then
-  echo "  sqlparse: установлен через pip --target"
-  rm -rf "$DIST/vendor"/*.dist-info "$DIST/vendor/bin" 2>/dev/null || true
+# деградирует без него; если sqlparse в vendor/ нет — папка всё равно рабочая.
+rsync -a --exclude='__pycache__' --exclude='tests' "$HERE/vendor/logZilla3000" "$DIST/vendor/"
+if [ -d "$HERE/vendor/sqlparse" ]; then
+  rsync -a --exclude='__pycache__' "$HERE/vendor/sqlparse" "$DIST/vendor/"
 else
-  echo "  ⚠ sqlparse недоступен (нет локальной копии и сети) — SQL-форматирование"
-  echo "    будет отключено. На работу парсера это не влияет. Чтобы включить:"
-  echo "    положите пакет sqlparse в $DIST/vendor/ и пересоберите."
+  echo "  ⚠ vendor/sqlparse отсутствует — SQL-форматирование будет отключено (парсер работает)."
 fi
 
 # --- 5. Лаунчеры ----------------------------------------------------------

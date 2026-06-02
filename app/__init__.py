@@ -1,14 +1,13 @@
 """logzilla-studio — HTTP/JSON-сервис и web-UI поверх ядра logZilla3000.
 
-Отдельный проект (живёт ВНЕ стабильного репозитория ядра): граница UI ↔ ядро
-вынесена на HTTP/JSON. Ядро (пакет logZilla3000) переиспользуется как есть —
-стабильный проект не изменяется и не зависит от studio.
+Самодостаточный продукт: ядро (пакет logZilla3000) и его опциональная зависимость
+sqlparse вендорятся внутрь — в каталог vendor/ рядом с app/. Граница UI ↔ ядро
+вынесена на HTTP/JSON. dev-раскладка совпадает с дистрибутивом («отдал запустил
+поехал»): на машине получателя нужен только python3 3.10+.
 
-Bootstrap: находим стабильный проект с пакетом logZilla3000 и добавляем его в
-sys.path (импорт без установки). Поиск (в порядке приоритета):
-  1) переменная окружения LOGZILLA3000_HOME;
-  2) соседняя папка ~/Downloads/logzilla3000-project (раскладка по умолчанию);
-  3) несколько типовых расположений рядом с этим проектом.
+Bootstrap: добавляем vendor/ в sys.path (импорт без установки). Порядок поиска:
+  1) переменная окружения LOGZILLA3000_HOME — dev-override на внешнее ядро;
+  2) vendor/ — канон (вендоренная копия).
 """
 
 import os
@@ -23,18 +22,13 @@ def _find_core_root() -> Path | None:
     here = Path(__file__).resolve()
     candidates: list[Path] = []
 
+    # Dev-override: внешнее ядро (для разработки против незавендоренной копии).
     env = os.environ.get("LOGZILLA3000_HOME")
     if env:
         candidates.append(Path(env).expanduser())
 
-    # Вендоренная копия ядра внутри самодостаточного дистрибутива (Вариант А:
-    # «отдал запустил поехал» — папка с vendor/ рядом с app/, ничего ставить не нужно).
+    # Канон: вендоренная копия ядра рядом с app/.
     candidates.append(here.parents[1] / "vendor")
-
-    # Соседний стабильный проект (раскладка ~/Downloads/{logzilla-studio, logzilla3000-project}).
-    candidates.append(here.parents[2] / "logzilla3000-project")
-    candidates.append(here.parents[1] / "logzilla3000-project")
-    candidates.append(Path.home() / "Downloads" / "logzilla3000-project")
 
     for c in candidates:
         if (c / "logZilla3000" / "__init__.py").is_file():
@@ -45,10 +39,9 @@ def _find_core_root() -> Path | None:
 _CORE_ROOT = _find_core_root()
 if _CORE_ROOT is None:
     raise RuntimeError(
-        "Не найден пакет ядра logZilla3000.\n"
-        "Укажите путь к стабильному проекту через переменную окружения, например:\n"
-        "  export LOGZILLA3000_HOME=/путь/к/logzilla3000-project\n"
-        "и запустите снова."
+        "Не найден пакет ядра logZilla3000 в vendor/.\n"
+        "Папка повреждена или собрана неполностью. Для разработки против внешнего\n"
+        "ядра укажите путь: export LOGZILLA3000_HOME=/путь/к/logzilla3000-project"
     )
 if str(_CORE_ROOT) not in sys.path:
     sys.path.insert(0, str(_CORE_ROOT))
