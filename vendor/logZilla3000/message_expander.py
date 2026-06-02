@@ -467,6 +467,10 @@ def _expand_logging_message(
                 result["message"] = expanded
         else:
             result["message"] = inner_message
+        # Прочие продуктовые поля рядом с Message (напр. кастомный trace_id) НЕ
+        # теряем: поднимаем на верхний уровень, не затирая уже поднятые поля.
+        for key, value in product_payload.items():
+            result.setdefault(_normalize_key(key), value)
     elif product_payload:
         # Если внутреннего Message нет, но есть другие продуктовые поля
         result["message"] = product_payload

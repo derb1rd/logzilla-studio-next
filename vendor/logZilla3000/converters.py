@@ -96,22 +96,27 @@ class JSONConverter:
         if self.normalize_keys:
             fieldnames = [self._normalize_key(name) for name in fieldnames]
 
+        def _cell(value: Optional[str]) -> Any:
+            if value is not None:
+                value = value.strip()
+                if value == "":
+                    value = None
+            if self.coerce_types and value is not None:
+                value = self._coerce_type(value)
+            return value
+
         result = []
         for row in data_rows:
             record = {}
-            for i, fieldname in enumerate(fieldnames):
-                value = row[i] if i < len(row) else None
-                if value is not None:
-                    value = value.strip()
-                    if value == "":
-                        value = None
-
-                if self.coerce_types and value is not None:
-                    value = self._coerce_type(value)
-
+            # Идём по максимуму из (заголовок, строка): если в строке полей БОЛЬШЕ,
+            # чем колонок в заголовке (рваный CSV), лишние не теряем — кладём под
+            # синтетическими именами col_N, а не отбрасываем молча.
+            ncols = max(len(fieldnames), len(row))
+            for i in range(ncols):
+                fieldname = fieldnames[i] if i < len(fieldnames) else f"col_{i}"
+                value = _cell(row[i] if i < len(row) else None)
                 if self.skip_null and value is None:
                     continue
-
                 record[fieldname] = value
             result.append(record)
 
@@ -486,12 +491,19 @@ class JSONConverter:
                 result.append(record)
                 continue
             flat: dict[str, Any] = {}
+            json_objects: list[dict] = []
+            # Два прохода, чтобы перекрытие было ДЕТЕРМИНИРОВАННЫМ (как обещает
+            # докстринг): сначала кладём скалярные колонки, затем разворачиваем
+            # JSON-колонки — их поля перекрывают одноимённые скаляры независимо от
+            # порядка колонок в исходной строке.
             for key, value in record.items():
                 obj = self._as_json_object(value)
                 if obj is None:
                     flat[key] = value
                 else:
-                    self._flatten_into(flat, obj, prefix="")
+                    json_objects.append(obj)
+            for obj in json_objects:
+                self._flatten_into(flat, obj, prefix="")
             result.append(flat)
         return result
 

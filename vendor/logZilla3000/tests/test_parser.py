@@ -834,6 +834,25 @@ class TestCsvWithJsonColumn(unittest.TestCase):
         self.assertNotIn("raw", rec)
 
 
+class TestConverterEdgeCases(unittest.TestCase):
+    """Краевые случаи конвертера: рваный CSV и детерминированное перекрытие JSON-колонок."""
+
+    def test_ragged_csv_extra_fields_kept_as_col_n(self):
+        # Лишние поля строки сверх заголовка не теряются — кладутся как col_N.
+        conv = JSONConverter()
+        out = conv.convert_csv_to_json("a,b\n1,2,3,4\n", delimiter=",", has_header=True)
+        self.assertEqual(out[0]["a"], 1)
+        self.assertEqual(out[0]["b"], 2)
+        self.assertEqual(out[0]["col_2"], 3)
+        self.assertEqual(out[0]["col_3"], 4)
+
+    def test_json_column_overrides_scalar_regardless_of_order(self):
+        # JSON-колонка перекрывает одноимённый скаляр, даже если идёт ПЕРЕД ним.
+        conv = JSONConverter()
+        out = conv.expand_json_columns([{"payload": '{"status": 200}', "status": "raw"}])
+        self.assertEqual(out[0]["status"], 200)
+
+
 class TestParseText(unittest.TestCase):
     """parse_text: разбор уже прочитанного содержимого (без повторного чтения файла)."""
 

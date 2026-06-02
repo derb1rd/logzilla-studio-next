@@ -460,6 +460,20 @@ class TestExpandWithProtobuf(unittest.TestCase):
         self.assertIn("field:", result["message"]["state"])
         self.assertTrue(result["message"]["success"])
 
+    def test_sibling_fields_preserved_with_inner_message(self):
+        """Продуктовые поля рядом с внутренним Message не теряются (поднимаются наверх)."""
+        record = {
+            "message": json.dumps({
+                "Name": "svc",
+                "Message": "hello",
+                "trace_id": "T-1",     # продуктовое поле рядом с Message
+            }),
+        }
+        result = expand_message_fields(record)
+        self.assertEqual(result["message"], "hello")
+        self.assertEqual(result["logger_name"], "svc")
+        self.assertEqual(result["trace_id"], "T-1")   # раньше терялось
+
 
 if __name__ == "__main__":
     unittest.main()
