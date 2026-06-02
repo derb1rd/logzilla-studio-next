@@ -52,6 +52,17 @@ class UniversalLogParser:
         result = parser.parse_file("custom.log")
     """
 
+    # Соответствие «расширение файла → формат» для parse_file/parse_text.
+    # Единый источник истины: сервисный слой (studio) переиспользует эту таблицу,
+    # чтобы зеркалить выбор формата, а не держать собственную копию.
+    FORMAT_BY_EXT: dict[str, LogFormat] = {
+        ".csv": LogFormat.CSV,
+        ".tsv": LogFormat.TSV,
+        ".json": LogFormat.JSON,
+        ".jsonl": LogFormat.JSONL,
+        ".ndjson": LogFormat.JSONL,
+    }
+
     def __init__(
         self,
         delimiter: Optional[str] = None,
@@ -227,40 +238,49 @@ class UniversalLogParser:
         # Пытаемся определить кодировку
         content = self._read_file(filepath)
         logger.debug("Файл прочитан: %s (%d символов)", filepath, len(content))
+        return self.parse_text(content, filepath=filepath)
 
-        # Определяем формат по расширению файла
-        ext = os.path.splitext(filepath)[1].lower()
-        fmt_by_ext: dict[str, LogFormat] = {
-            ".csv": LogFormat.CSV,
-            ".tsv": LogFormat.TSV,
-            ".json": LogFormat.JSON,
-            ".jsonl": LogFormat.JSONL,
-            ".ndjson": LogFormat.JSONL,
-        }
+    def parse_text(
+        self, content: str, filepath: Optional[str] = None
+    ) -> list[dict[str, Any]] | dict[str, Any]:
+        """Парсинг уже прочитанного содержимого.
 
-        if ext in fmt_by_ext:
-            fmt = fmt_by_ext[ext]
-            logger.debug("Формат по расширению %s: %s", ext, fmt.value)
-            # Для JSON/JSONL — минимальная очистка (не ломаем структуру)
-            if fmt in (LogFormat.JSON, LogFormat.JSONL):
-                cleaned = self._clean_json_content(content)
-            elif fmt in (LogFormat.CSV, LogFormat.TSV):
-                # Щадящая очистка: не искажаем встроенный в колонки JSON/дампы.
-                cleaned = self.cleaner.clean_tabular(content)
-            else:
-                cleaned = self.cleaner.clean(content)
+        Если задан filepath с известным расширением (.csv/.tsv/.json/...), формат
+        выбирается по нему — как в parse_file. Иначе формат определяется по
+        содержимому — как в parse(). Вынесено из parse_file, чтобы вызывающий, уже
+        прочитавший файл (напр. сервисный слой studio ради метрик/диагностики
+        кодировки), не читал его второй раз.
 
-            # Фильтрация (даже при определении формата по расширению)
-            cleaned = self._apply_filters(cleaned, fmt)
+        Args:
+            content: Содержимое лога
+            filepath: Исходный путь (используется только для выбора формата по
+                расширению; чтения файла не происходит)
+        """
+        ext = os.path.splitext(filepath)[1].lower() if filepath else ""
+        fmt = self.FORMAT_BY_EXT.get(ext)
 
-            result = self._convert(cleaned, fmt)
-            result = self._expand_json_columns(result, fmt)
-            result = expand_message_fields(result, enabled=self.expand_message)
-            result = format_sql_fields(result, enabled=self.format_sql)
-            return result
+        if fmt is None:
+            # Неизвестное расширение (или inline) — автоопределение по содержимому.
+            return self.parse(content)
 
-        # Для остальных расширений — автоопределение
-        return self.parse(content)
+        logger.debug("Формат по расширению %s: %s", ext, fmt.value)
+        # Для JSON/JSONL — минимальная очистка (не ломаем структуру)
+        if fmt in (LogFormat.JSON, LogFormat.JSONL):
+            cleaned = self._clean_json_content(content)
+        elif fmt in (LogFormat.CSV, LogFormat.TSV):
+            # Щадящая очистка: не искажаем встроенный в колонки JSON/дампы.
+            cleaned = self.cleaner.clean_tabular(content)
+        else:
+            cleaned = self.cleaner.clean(content)
+
+        # Фильтрация (даже при определении формата по расширению)
+        cleaned = self._apply_filters(cleaned, fmt)
+
+        result = self._convert(cleaned, fmt)
+        result = self._expand_json_columns(result, fmt)
+        result = expand_message_fields(result, enabled=self.expand_message)
+        result = format_sql_fields(result, enabled=self.format_sql)
+        return result
 
     def parse_files(self, filepaths: list[str]) -> list[dict[str, Any]]:
         """

@@ -517,8 +517,12 @@ function moveSelection(delta) {
 }
 
 // --- инспектор (право) ------------------------------------------------------
+// Экранируем и кавычки: summaryHtml/contextHtml вставляют значения в HTML-атрибуты
+// (data-rid, title), а они приходят из содержимого логов (req_id) и имён файлов.
+// Без экранирования " и ' возможна инъекция атрибута/XSS из лога.
+const _HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 function escapeHtml(s) {
-  return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => _HTML_ESCAPES[c]);
 }
 
 function renderInspector() {

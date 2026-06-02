@@ -311,12 +311,14 @@ class LogCleaner:
         if start is None and end is None:
             return lines
 
-        start_dt = (
-            datetime.fromisoformat(start.replace("Z", "+00:00")) if start else None
-        )
-        end_dt = (
-            datetime.fromisoformat(end.replace("Z", "+00:00")) if end else None
-        )
+        # Границы приводим к naive (без tzinfo): таймстампы строк парсятся strptime'ом
+        # как naive, а сравнение aware и naive datetime бросает TypeError. Делаем обе
+        # стороны naive, чтобы фильтр был консистентным и не падал на ISO-границе с Z.
+        def _naive(s: str) -> datetime:
+            return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+
+        start_dt = _naive(start) if start else None
+        end_dt = _naive(end) if end else None
 
         result: list[str] = []
         for line in lines:

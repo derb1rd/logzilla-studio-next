@@ -46,16 +46,28 @@
     return "";
   }
 
+  // Уровни-ключи и текстовые поля — зеркало серверного _record_level
+  // (parse_service.py). Фолбэк ищет уровень ТОЛЬКО в тексте строки лога, а не во
+  // всём JSON.stringify(record): иначе слово ERROR/WARN в произвольном поле
+  // (`{"handler":"error_cb"}`) ложно завышает уровень — и счётчики UI расходятся
+  // с серверными метриками.
+  const LEVEL_KEYS = ["level", "levelname", "log_level", "loglevel", "severity", "lvl"];
+
   function levelOf(record) {
     if (record == null || typeof record !== "object") return "";
-    for (const k of ["level", "levelname", "log_level", "loglevel", "severity"]) {
+    for (const k of LEVEL_KEYS) {
       if (typeof record[k] === "string") {
         const mm = record[k].match(LEVEL_RE);
         if (mm) return norm(mm[1]);
       }
     }
-    const mm = JSON.stringify(record).match(LEVEL_RE);
-    return mm ? norm(mm[1]) : "";
+    for (const k of TEXT_KEYS) {
+      if (typeof record[k] === "string") {
+        const mm = record[k].match(LEVEL_RE);
+        if (mm) return norm(mm[1]);
+      }
+    }
+    return "";
   }
 
   function fieldOf(rec, keys) {

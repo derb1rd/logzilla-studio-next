@@ -14,6 +14,10 @@ test("levelOf: структурное поле и вытяжка из raw", () =
   assert.equal(LZ.levelOf(txt("... ERROR boom")), "ERROR");
   assert.equal(LZ.levelOf({ message: "all good" }), "");
   assert.equal(LZ.levelOf(null), "");                              // не падает
+  // Фолбэк ищет уровень только в level- и текстовых полях, не во всём JSON:
+  // ERROR/WARN в произвольном поле не должны завышать уровень (зеркало сервера).
+  assert.equal(LZ.levelOf({ handler: "error_cb", message: "all good" }), "");
+  assert.equal(LZ.levelOf({ lvl: "warn" }), "WARN");               // ключ lvl поддержан
 });
 
 test("sourceOf: поле, компонент из текста, отброс HTTP-глаголов", () => {

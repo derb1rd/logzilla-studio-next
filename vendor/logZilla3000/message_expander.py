@@ -65,13 +65,6 @@ KEY_MAPPING: dict[str, str] = {
 # Поля, которые поднимаются из вложенного logging-объекта в родительскую запись
 FLATTEN_FIELDS: frozenset[str] = frozenset(KEY_MAPPING.keys())
 
-# Паттерн для определения Python dict repr (одинарные кавычки, True/False/None)
-_PYTHON_DICT_PATTERN = re.compile(r"^\s*\{.*\}\s*$", re.DOTALL)
-_PYTHON_LITERAL_PATTERN = re.compile(
-    r"""(?:True|False|None|['"]\w+['"]|\d+\.?\d*)""",
-    re.MULTILINE,
-)
-
 
 def _decode_unicode_escapes(obj: Any) -> Any:
     """

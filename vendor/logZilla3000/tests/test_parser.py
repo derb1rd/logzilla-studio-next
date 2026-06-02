@@ -834,5 +834,40 @@ class TestCsvWithJsonColumn(unittest.TestCase):
         self.assertNotIn("raw", rec)
 
 
+class TestParseText(unittest.TestCase):
+    """parse_text: разбор уже прочитанного содержимого (без повторного чтения файла)."""
+
+    CSV = "level,msg\nINFO,hello\nERROR,boom\n"
+
+    def test_parse_text_with_ext_matches_parse_file(self):
+        # С filepath формат берётся по расширению — результат идентичен parse_file.
+        parser = UniversalLogParser()
+        via_text = parser.parse_text(self.CSV, filepath="data.csv")
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".csv", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(self.CSV)
+            path = f.name
+        try:
+            via_file = parser.parse_file(path)
+        finally:
+            os.unlink(path)
+        self.assertEqual(via_text, via_file)
+        self.assertEqual(len(via_text), 2)
+        self.assertEqual(via_text[0]["level"], "INFO")
+
+    def test_parse_text_without_filepath_autodetects(self):
+        # Без filepath — автоопределение по содержимому (как parse()).
+        parser = UniversalLogParser()
+        self.assertEqual(parser.parse_text(self.CSV), parser.parse(self.CSV))
+
+    def test_unknown_ext_falls_back_to_autodetect(self):
+        parser = UniversalLogParser()
+        self.assertEqual(
+            parser.parse_text(self.CSV, filepath="data.unknown"),
+            parser.parse(self.CSV),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

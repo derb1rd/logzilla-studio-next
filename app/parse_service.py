@@ -124,22 +124,20 @@ def _detect_format(raw: str) -> str:
         return "unknown"
 
 
-# Расширения, по которым ядро (parser.parse_file) выбирает формат БЕЗ автоопределения.
-_FORMAT_BY_EXT = {".csv": "csv", ".tsv": "tsv", ".json": "json", ".jsonl": "jsonl", ".ndjson": "jsonl"}
-
-
 def _resolve_format(req: ParseRequest, raw: str) -> str:
     """Формат, фактически применённый ядром (MED-3).
 
-    Для file-источника ядро выбирает формат по расширению (parse_file), а не по
-    содержимому — поэтому для data.csv нельзя пере-детектить и показывать "text".
-    Зеркалим правило ядра: известное расширение → его формат; иначе (и для inline)
-    — автоопределение по содержимому, как делает parser.parse().
+    Для file-источника ядро выбирает формат по расширению (parse_file/parse_text),
+    а не по содержимому — поэтому для data.csv нельзя пере-детектить и показывать
+    "text". Переиспользуем ту же таблицу расширений, что и ядро
+    (UniversalLogParser.FORMAT_BY_EXT), чтобы правила не разъезжались; иначе (и для
+    inline) — автоопределение по содержимому, как делает parser.parse().
     """
     if req.source.kind == "file":
         ext = os.path.splitext(req.source.path or "")[1].lower()
-        if ext in _FORMAT_BY_EXT:
-            return _FORMAT_BY_EXT[ext]
+        fmt = UniversalLogParser.FORMAT_BY_EXT.get(ext)
+        if fmt is not None:
+            return fmt.value
     return _detect_format(raw)
 
 
@@ -185,13 +183,20 @@ def _run(req: ParseRequest) -> _Run:
     if req.source.kind == "inline":
         raw = req.source.text or ""
     else:
+        # Читаем файл ОДИН раз: raw нужен для метрик/диагностики кодировки, и он же
+        # уходит в parse_text — ядро повторно файл не открывает (раньше parse_file
+        # читал его второй раз). filepath передаём только ради выбора формата по
+        # расширению.
         raw, diag = _read_file(req.source.path or "", req.options.encoding)
         if diag:
             diagnostics.append(diag)
 
     fmt = _resolve_format(req, raw)
     parser = _build_parser(req)
-    result = parser.parse_file(req.source.path) if req.source.kind == "file" else parser.parse(raw)
+    if req.source.kind == "file":
+        result = parser.parse_text(raw, filepath=req.source.path)
+    else:
+        result = parser.parse(raw)
     records = _normalize(result)
 
     total = len(records)
