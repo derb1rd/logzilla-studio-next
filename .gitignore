@@ -1,0 +1,11 @@
+# Артефакты сборки/раздачи — в git не нужны (собираются из исходников)
+dist/
+releases/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# macOS
+.DS_Store

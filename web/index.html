@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>logZilla3000 · studio — inspector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="brand">
+      <!-- Zilla mascot (inline SVG, vanilla — без React/Babel из концепта) -->
+      <svg class="mascot" width="26" height="26" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M6 38 C6 26, 14 18, 26 17 C32 16, 38 18, 42 22 L58 22 L54 28 L58 30 L52 34 L54 40 C54 50, 44 56, 32 56 C16 56, 6 50, 6 38 Z"
+              fill="var(--accent)" stroke="#0f0b1a" stroke-width="2" stroke-linejoin="round"/>
+        <path d="M16 18 L18 14 L20 18 M22 16 L24 12 L26 16 M28 16 L30 12 L32 16" fill="none" stroke="#0f0b1a" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="36" cy="30" r="5" fill="#fff" stroke="#0f0b1a" stroke-width="1.4"/>
+        <circle cx="36.5" cy="30.5" r="2.2" fill="#0f0b1a"/>
+        <circle cx="53" cy="27" r="1.1" fill="#0f0b1a"/>
+        <path d="M44 36 L46 39 L48 36 L50 39 L52 36" fill="none" stroke="#0f0b1a" stroke-width="1.4"/>
+        <path d="M42 39 L56 39" fill="none" stroke="#0f0b1a" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <div class="brand-text">
+        <span class="brand-name">logZilla<span class="accent">3000</span></span>
+        <span class="brand-sub">INSPECTOR · 3-PANE</span>
+      </div>
+    </div>
+
+    <div class="breadcrumb" id="breadcrumb">
+      <span>studio</span><span class="sep">/</span>
+      <span id="bc-source" class="bc-source">нет источника</span><span class="sep">/</span>
+      <span id="bc-filter" class="bc-filter">все уровни</span>
+    </div>
+
+    <div class="searchbar">
+      <span class="search-ico">⌕</span>
+      <input type="search" id="search" placeholder="фильтр: текст · lvl:ERROR · src:api · req:7f3a">
+      <span class="kbd">⌘K</span>
+    </div>
+
+    <div class="status" id="health">● подключение…</div>
+  </header>
+
+  <!-- MAIN — 3 panes -->
+  <main class="panes">
+
+    <!-- LEFT — источник + сохранённые фильтры -->
+    <aside class="pane pane-left">
+      <div class="group-label">ИСТОЧНИК · сессия</div>
+      <div id="dropzone" class="dropzone">
+        <p>Перетащите логи сюда<br>или нажмите для выбора</p>
+        <p class="hint">.log .txt .csv .json .jsonl · можно несколько · до 64 МБ</p>
+        <input type="file" id="file" hidden multiple>
+      </div>
+      <ul id="fileTree" class="file-tree" hidden></ul>
+      <textarea id="paste" placeholder="…или вставьте логи (добавятся в сессию при «Парсить»)"></textarea>
+
+      <div class="group-label">УРОВНИ · фильтры</div>
+      <div class="filters" id="filters">
+        <label class="lvl-tile t-ERROR"><input type="checkbox" class="lvl" value="ERROR" checked>
+          <span class="lvl-name">ERROR</span><span class="lvl-count" id="cnt-ERROR">—</span></label>
+        <label class="lvl-tile t-WARN"><input type="checkbox" class="lvl" value="WARN" checked>
+          <span class="lvl-name">WARN</span><span class="lvl-count" id="cnt-WARN">—</span></label>
+        <label class="lvl-tile t-INFO"><input type="checkbox" class="lvl" value="INFO" checked>
+          <span class="lvl-name">INFO</span><span class="lvl-count" id="cnt-INFO">—</span></label>
+        <label class="lvl-tile t-DEBUG"><input type="checkbox" class="lvl" value="DEBUG" checked>
+          <span class="lvl-name">DEBUG</span><span class="lvl-count" id="cnt-DEBUG">—</span></label>
+      </div>
+
+      <div class="group-label">ПАРСЕР</div>
+      <div class="field">
+        <label for="encoding">Кодировка</label>
+        <select id="encoding">
+          <option>utf-8</option><option>utf-8-sig</option>
+          <option>cp1251</option><option>koi8-r</option><option>latin-1</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="remove_duplicates" checked> Удалять дубликаты</label>
+      <label class="check"><input type="checkbox" id="remove_ansi" checked> Удалять ANSI</label>
+      <label class="check"><input type="checkbox" id="expand_message" checked> Раскрыть JSON в message</label>
+      <label class="check"><input type="checkbox" id="compact_json"> Компактный JSON</label>
+
+      <div class="left-actions">
+        <button id="parseBtn" class="primary">Парсить</button>
+      </div>
+    </aside>
+
+    <!-- CENTER — поток логов -->
+    <section class="pane pane-center">
+      <div class="stream-head">
+        <span class="col-n">#</span>
+        <span class="col-ts">TIMESTAMP</span>
+        <span class="col-lvl">LVL</span>
+        <span class="col-src">SOURCE</span>
+        <span class="col-msg">MESSAGE</span>
+      </div>
+      <div id="stream" class="stream">
+        <div class="stream-empty">Загрузите файл или вставьте текст, затем «Парсить».</div>
+      </div>
+      <div class="stream-toolbar" id="streamToolbar">
+        <span id="t-shown">—</span>
+        <span class="sep">·</span>
+        <span id="t-format">—</span>
+        <span class="sep">·</span>
+        <span class="t-err"><b id="t-err">—</b> ERROR</span>
+        <span class="t-warn"><b id="t-warn">—</b> WARN</span>
+        <span id="t-duration" class="t-dur"></span>
+      </div>
+    </section>
+
+    <!-- RIGHT — inspector -->
+    <aside class="pane pane-right">
+      <div class="insp-head" id="inspHead">
+        <div class="insp-empty">Выберите строку в потоке, чтобы раскрыть запись.</div>
+      </div>
+      <div class="insp-tabs" id="inspTabs" hidden>
+        <span class="tab active" data-tab="struct">Структура</span>
+        <span class="tab" data-tab="context">Контекст</span>
+        <span class="tab" data-tab="similar">Похожие</span>
+      </div>
+      <div class="insp-body" id="inspBody"></div>
+
+      <div class="export" id="exportBar">
+        <select id="exportScope" class="export-scope" title="Что экспортировать">
+          <option value="active">активный файл</option>
+          <option value="all">все файлы (по отдельности)</option>
+        </select>
+        <label class="check"><input type="checkbox" id="gzip"> gzip</label>
+        <button id="exportBtn" class="primary">Экспортировать JSON</button>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <span id="footer-status">Готов к работе</span>
+    <a href="#" id="dumplog" class="dumplog" title="Скачать журнал действий для отладки (в т.ч. с ИИ)">⛏ action log</a>
+  </footer>
+
+  <script src="/observability.js"></script>
+  <script src="/core.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

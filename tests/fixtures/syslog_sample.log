@@ -1,0 +1,7 @@
+2024-01-15 10:30:15 INFO User authentication successful for user: john.doe
+2024-01-15 10:30:15 DEBUG Session ID: abc123def456
+2024-01-15 10:30:16 ERROR Database connection failed: Connection timeout
+2024-01-15 10:30:16 WARN Retrying connection in 5 seconds...
+2024-01-15 10:30:21 INFO Database connection restored
+2024-01-15 10:30:24 WARN High memory usage detected: 85%
+2024-01-15 10:30:26 ERROR Failed to send email notification
