@@ -4,5 +4,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${PORT:-8765}"
 HOST="${HOST:-127.0.0.1}"
-echo "logzilla-studio → http://${HOST}:${PORT}"
+URL="http://${HOST}:${PORT}"
+echo "logzilla-studio → $URL"
+# Открыть браузер, когда сервер поднимется (NO_OPEN=1 — отключить).
+if [ "${NO_OPEN:-}" != "1" ] && command -v open >/dev/null 2>&1; then
+  ( sleep 1; open "$URL" ) &
+fi
 exec python3 -m app.server --host "$HOST" --port "$PORT"

@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Сборка самодостаточной папки
+        run: |
+          ./build_dist.sh out/logzilla-studio
+          cd out
+          zip -r "logzilla-studio-${GITHUB_REF_NAME}.zip" logzilla-studio
+          shasum -a 256 *.zip > SHA256SUMS
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.zip
+            out/SHA256SUMS
+          generate_release_notes: true
