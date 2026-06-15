@@ -67,15 +67,17 @@ class FormatDetector:
     # Паттерн для определения CSV-заголовка.
     # Имена колонок допускают точку и дефис: продуктовые экспорты сплошь и рядом
     # используют их (kubernetes.container_name, event.original, x-request-id).
+    # Ведущий «@» — поля Elastic/ECS (@timestamp, @version): Kibana-экспорты сплошь
+    # начинаются с такой колонки, без неё весь файл уезжал в текстовый путь.
     # Без этого такой заголовок не матчился → файл уезжал в текстовый путь и
     # парсился reg-экспами вместо разбивки по колонкам.
     CSV_HEADER_PATTERN = re.compile(
-        r"^[a-zA-Z_][\w.\-]*"
-        r"(?:[,;\t][a-zA-Z_][\w.\-]*)+$"
+        r"^@?[a-zA-Z_][\w.\-]*"
+        r"(?:[,;\t]@?[a-zA-Z_][\w.\-]*)+$"
     )
 
     # Имя одной колонки (проверяется после снятия кавычек csv.reader'ом).
-    COLUMN_NAME_PATTERN = re.compile(r"^[a-zA-Z_][\w.\-]*$")
+    COLUMN_NAME_PATTERN = re.compile(r"^@?[a-zA-Z_][\w.\-]*$")
 
     def __init__(self, sample_size: int = 50):
         """

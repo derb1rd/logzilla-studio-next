@@ -54,6 +54,28 @@ def test_format_detected_diagnostic_present():
     assert res.format_detected is not None
 
 
+def test_elastic_csv_with_at_timestamp_detected_and_expanded():
+    """Kibana/Elastic-экспорт: первая колонка `@timestamp` (ведущий @) раньше
+    проваливал детектор имён колонок → весь CSV уезжал в текстовый путь и message
+    с вложенным JSON не раскрывался. Регресс на разбор по колонкам + expand_message."""
+    csv_text = (
+        '"@timestamp","env","message"\n'
+        '"Jun 5, 2026 @ 20:29:02.565","preprod","{""level"":""INFO"",""method"":""GET"",'
+        '""url"":""/api/system/about"",""status"":200,""req_id"":""7FDA"",""msg"":""Finish""}"\n'
+        '"Jun 5, 2026 @ 20:29:02.566","preprod","{""level"":""DEBUG"",""sql"":""select 1"",'
+        '""req_id"":""7FDA"",""msg"":""Query""}"'
+    )
+    res = parse(_inline(csv_text, expand_message=True))
+    assert res.format_detected == "csv"
+    # message раскрыт: структурные поля стали колонками записи
+    rec = res.records[0]
+    assert rec.get("method") == "GET"
+    assert rec.get("url") == "/api/system/about"
+    assert rec.get("status") == 200
+    # SQL-запись тоже разобрана
+    assert any(r.get("sql") for r in res.records)
+
+
 def test_determinism_same_input_same_output():
     a = parse(_inline(SYSLOG)).to_dict()
     b = parse(_inline(SYSLOG)).to_dict()
