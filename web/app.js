@@ -57,7 +57,7 @@ const shortName = (n) => (n.length > 14 ? n.slice(0, 7) + "…" + n.slice(-5) : 
 // Извлечение полей, разбор запросов и подсветка вынесены в core.js (глобал LZ)
 // и покрыты юнит-тестами (tests/core.test.mjs). Здесь — только DOM/IO.
 const {
-  LEVEL_RE, norm, levelOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, recordToLine,
+  LEVEL_RE, norm, levelOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, sqlOf, recordToLine,
   buildQuery, isEmptyQuery, matchesQuery, highlightSegments, crossContext,
 } = LZ;
 
@@ -349,6 +349,20 @@ function applySearch() {
   renderInspector();
 }
 
+// Маскот Zilla для пустых состояний (то же тело, что в топбаре) — приглушённый.
+const MASCOT_SVG =
+  `<svg class="empty-mascot" width="44" height="44" viewBox="0 0 64 64" aria-hidden="true">` +
+  `<path d="M6 38 C6 26, 14 18, 26 17 C32 16, 38 18, 42 22 L58 22 L54 28 L58 30 L52 34 L54 40 C54 50, 44 56, 32 56 C16 56, 6 50, 6 38 Z" fill="var(--accent)" stroke="#0f0b1a" stroke-width="2" stroke-linejoin="round"/>` +
+  `<circle cx="36" cy="30" r="5" fill="#fff" stroke="#0f0b1a" stroke-width="1.4"/>` +
+  `<circle cx="36.5" cy="30.5" r="2.2" fill="#0f0b1a"/></svg>`;
+
+// Разметка пустого состояния: маскот + заголовок + (опц.) подсказка.
+function emptyState(title, hint) {
+  return MASCOT_SVG +
+    `<span class="empty-title">${title}</span>` +
+    (hint ? `<span class="empty-hint">${hint}</span>` : "");
+}
+
 function renderStream() {
   const box = $("stream");
   box.innerHTML = "";
@@ -359,15 +373,15 @@ function renderStream() {
     : `${ru(visible)} из ${ru(win)} в окне`;
   if (state.records.length === 0) {
     const entry = activeEntry();
-    const msg = !entry ? "Добавьте файлы в сессию, затем «Парсить»."
-      : entry.status === "error" ? "Ошибка парсинга: " + escapeHtml(entry.error || "")
-      : entry.status === "parsed" ? "Парсер не извлёк записей."
-      : "Нажмите «Парсить».";
-    box.innerHTML = `<div class="stream-empty">${msg}</div>`;
+    const body = !entry ? emptyState("Здесь появится поток логов", "Добавьте файлы в сессию, затем «Парсить».")
+      : entry.status === "error" ? emptyState("Ошибка парсинга", escapeHtml(entry.error || ""))
+      : entry.status === "parsed" ? emptyState("Парсер не извлёк записей", "Проверьте формат и кодировку файла.")
+      : emptyState("Готово к парсингу", "Нажмите «Парсить».");
+    box.innerHTML = `<div class="stream-empty">${body}</div>`;
     return;
   }
   if (state.view.length === 0) {
-    box.innerHTML = '<div class="stream-empty">Поиск ничего не нашёл.</div>';
+    box.innerHTML = `<div class="stream-empty">${emptyState("Ничего не найдено", "Смягчите фильтр или измените запрос.")}</div>`;
     return;
   }
   const frag = document.createDocumentFragment();
@@ -507,6 +521,15 @@ function selectRecordIn(fileId, rec) {
   selectRecord(rec);
 }
 
+// Снять выбор: закрывает инспектор (и drawer на узких экранах), гасит подсветку.
+function closeInspector() {
+  state.selectedRec = null;
+  state.selected = -1;
+  obs.action("inspect_close", {});
+  paintSelection();
+  renderInspector();
+}
+
 // Шаг выбора по потоку (стрелки ↑/↓).
 function moveSelection(delta) {
   if (state.view.length === 0) return;
@@ -530,8 +553,9 @@ function renderInspector() {
   const tabs = $("inspTabs");
   const body = $("inspBody");
   const rec = state.selectedRec;
+  document.body.classList.toggle("inspect", !!rec);   // drawer-режим на узких экранах
   if (!rec) {
-    head.innerHTML = '<div class="insp-empty">Выберите строку в потоке, чтобы раскрыть запись.</div>';
+    head.innerHTML = `<div class="insp-empty">${emptyState("Запись не выбрана", "Выберите строку в потоке, чтобы раскрыть её.")}</div>`;
     tabs.hidden = true;
     body.innerHTML = "";
     return;
@@ -574,7 +598,7 @@ function renderTab() {
   const rec = state.selectedRec;
   if (!rec) { body.innerHTML = ""; return; }
   if (state.activeTab === "struct") {
-    body.innerHTML = jsonHtml(rec) + histoHtml();
+    body.innerHTML = sqlBlockHtml(rec) + jsonHtml(rec) + histoHtml();
   } else if (state.activeTab === "context") {
     body.innerHTML = contextHtml();
     bindCtxRows();
@@ -597,6 +621,21 @@ function bindCtxRows() {
   });
 }
 
+// Выделенный SQL-блок инспектора: полная (отформатированная ядром через sqlparse)
+// форма запроса с подсветкой ключевых слов. Здесь форматирование ядра наконец
+// окупается — в потоке/шапке SQL остаётся однострочным сниппетом. Для записей без
+// SQL — пустая строка (блок не появляется).
+const SQL_KW = /\b(SELECT|FROM|WHERE|INNER|LEFT|RIGHT|OUTER|FULL|CROSS|JOIN|ON|USING|AND|OR|NOT|IN|EXISTS|AS|ORDER|GROUP|BY|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|INSERT|INTO|VALUES|UPDATE|SET|DELETE|RETURNING|WITH|CASE|WHEN|THEN|ELSE|END|NULL|IS|LIKE|ILIKE|BETWEEN|ASC|DESC|ON\s+CONFLICT)\b/gi;
+function sqlHighlight(sql) {
+  return escapeHtml(sql).replace(SQL_KW, (m) => `<span class="sql-kw">${m}</span>`);
+}
+function sqlBlockHtml(rec) {
+  const sql = sqlOf(rec);
+  if (!sql) return "";
+  return `<div class="sql-block"><div class="sql-block-label">SQL</div>` +
+    `<pre class="sql-code">${sqlHighlight(sql)}</pre></div>`;
+}
+
 // pretty-print JSON с подсветкой; уровень окрашиваем по значению
 function jsonHtml(rec) {
   const lines = ['<div class="json-line">{</div>'];
@@ -614,8 +653,11 @@ function valHtml(key, v) {
   if (typeof v === "boolean") return `<span class="j-bool">${v}</span>`;
   if (typeof v === "number") return `<span class="j-num">${v}</span>`;
   if (typeof v === "object") return `<span class="j-str">${escapeHtml(JSON.stringify(v))}</span>`;
-  const s = escapeHtml(v);
-  const m = String(v).match(LEVEL_RE);
+  // Схлопываем переносы внутри значения: компактная запись остаётся однострочной
+  // (полную форму многострочного SQL показывает выделенный SQL-блок выше).
+  const flat = String(v).replace(/\s*\n\s*/g, " ");
+  const s = escapeHtml(flat);
+  const m = flat.match(LEVEL_RE);
   if (m && String(v).length < 12) return `<span class="j-lvl-${norm(m[1])}">"${s}"</span>`;
   return `<span class="j-str">"${s}"</span>`;
 }
@@ -836,6 +878,8 @@ function wireUp() {
 
   $("parseBtn").addEventListener("click", doParse);
   $("exportBtn").addEventListener("click", doExport);
+  $("inspClose").addEventListener("click", closeInspector);
+  $("inspBackdrop").addEventListener("click", closeInspector);
 
   $("search").addEventListener("input", (e) => {
     obs.action("search", { len: e.target.value.length });
@@ -847,6 +891,7 @@ function wireUp() {
     const tag = (document.activeElement?.tagName || "").toUpperCase();
     const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
     if (e.key === "Escape" && tag === "INPUT") { e.target.blur(); return; }
+    if (e.key === "Escape" && state.selectedRec) { closeInspector(); return; }
     if (typing) return;                         // не мешаем вводу
     if (e.key === "ArrowDown") { e.preventDefault(); moveSelection(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); moveSelection(-1); }

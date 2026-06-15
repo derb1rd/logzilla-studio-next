@@ -33,17 +33,31 @@
 
   const norm = (s) => (s.toUpperCase() === "WARNING" ? "WARN" : s.toUpperCase());
 
-  // Короткий однострочный сниппет SQL: схлопываем переносы/отступы, обрезаем по max.
-  function sqlSnippetOf(rec, max = 80) {
+  // Значение поля → однострочное представление: объекты сериализуем, у строк
+  // схлопываем любые пробелы/переносы. Нужен, чтобы многострочный (отформатированный
+  // ядром) SQL/JSON не рвал однострочный предпросмотр в потоке и шапке инспектора.
+  const flatVal = (v) =>
+    v === null ? "null"
+    : typeof v === "object" ? JSON.stringify(v)
+    : String(v).replace(/\s+/g, " ").trim();
+
+  // Сырое поле SQL записи (как вернуло ядро — возможно, многострочное, отформатиро-
+  // ванное sqlparse). Для выделенного SQL-блока в инспекторе.
+  function sqlOf(rec) {
     if (rec == null || typeof rec !== "object") return "";
     for (const k of QUERY_KEYS) {
       const v = rec[k];
-      if (typeof v === "string" && v.trim()) {
-        const flat = v.replace(/\s+/g, " ").trim();
-        return flat.length > max ? flat.slice(0, max).trimEnd() + "…" : flat;
-      }
+      if (typeof v === "string" && v.trim()) return v.replace(/\s+$/, "");
     }
     return "";
+  }
+
+  // Короткий однострочный сниппет SQL: схлопываем переносы/отступы, обрезаем по max.
+  function sqlSnippetOf(rec, max = 80) {
+    const v = sqlOf(rec);
+    if (!v) return "";
+    const flat = v.replace(/\s+/g, " ").trim();
+    return flat.length > max ? flat.slice(0, max).trimEnd() + "…" : flat;
   }
 
   // Уровни-ключи и текстовые поля — зеркало серверного _record_level
@@ -52,6 +66,16 @@
   // (`{"handler":"error_cb"}`) ложно завышает уровень — и счётчики UI расходятся
   // с серверными метриками.
   const LEVEL_KEYS = ["level", "levelname", "log_level", "loglevel", "severity", "lvl"];
+
+  // Ключи, которые предпросмотр показывает отдельными осями (время/уровень/источник/
+  // req_id/HTTP-метод/путь/статус/длительность/SQL). В «остаток» base (msgOf для
+  // записей без текстового поля) их не включаем — иначе строка дублирует цветные
+  // чипы сырым k=v и в неё текут наносекунды/переносы SQL.
+  const CONSUMED_KEYS = new Set(
+    [...TEXT_KEYS, ...TS_KEYS, ...SRC_KEYS, ...LEVEL_KEYS, ...REQ_KEYS,
+     ...METHOD_KEYS, ...URL_KEYS, ...STATUS_KEYS, ...NS_DUR_KEYS, ...QUERY_KEYS]
+      .map((k) => k.toLowerCase()),
+  );
 
   function levelOf(record) {
     if (record == null || typeof record !== "object") return "";
@@ -79,8 +103,21 @@
     return "";
   }
 
+  const ISO_TS_RE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/;
   function tsOf(rec) {
-    const t = fieldOf(rec, TS_KEYS);
+    // Среди полей-кандидатов предпочитаем ISO-8601 (машинное время СОБЫТИЯ —
+    // сортируемое и однозначное) человекочитаемым строкам вроде «Jun 5, 2026 @ …»:
+    // в Kibana-экспортах @timestamp — это время приёма (батчами), а реальное время
+    // события лежит в ISO-поле time/timestamp_iso. Иначе — первое присутствующее.
+    let iso = "", first = "";
+    for (const k of TS_KEYS) {
+      const v = rec[k];
+      const s = typeof v === "string" ? v : (typeof v === "number" ? String(v) : "");
+      if (!s) continue;
+      if (!first) first = s;
+      if (!iso && ISO_TS_RE.test(s)) { iso = s; break; }
+    }
+    const t = iso || first;
     if (!t) return "";
     // выжимаем HH:MM:SS(.ms) если есть — компактнее для колонки
     const m = t.match(/\d{2}:\d{2}:\d{2}(?:[.,]\d{1,3})?/);
@@ -118,17 +155,16 @@
   }
 
   function msgOf(rec) {
-    let text = null;
     for (const k of TEXT_KEYS) {
-      if (typeof rec[k] === "string") { text = rec[k]; break; }
+      if (typeof rec[k] === "string") return rec[k];
     }
-    if (text == null) {
-      text = Object.entries(rec)
-        .filter(([k]) => !TS_KEYS.includes(k) && !SRC_KEYS.includes(k))
-        .map(([k, v]) => `${k}=${v !== null && typeof v === "object" ? JSON.stringify(v) : v}`)
-        .join("  ·  ");
-    }
-    return text;
+    // Нет текстового поля → собираем «остаток»: только поля, не показанные отдельно
+    // как структурные оси (см. CONSUMED_KEYS). Значения флэтим, чтобы предпросмотр
+    // оставался однострочным.
+    return Object.entries(rec)
+      .filter(([k]) => !CONSUMED_KEYS.has(k.toLowerCase()))
+      .map(([k, v]) => `${k}=${flatVal(v)}`)
+      .join(" · ");
   }
 
   // Наносекунды → компактная человекочитаемая длительность (µs/ms/s/min).
@@ -152,21 +188,23 @@
     const base = msgOf(rec);
     const out = { base, method: "", url: "", status: "", dur: "", sql: "" };
     if (rec == null || typeof rec !== "object") return out;
-    const inBase = (v) => v !== "" && base.includes(String(v));
-
-    // SQL-сниппет добавляем, только если у записи есть отдельное текстовое поле
-    // (иначе msgOf уже развернул все поля в base и sql там присутствует — не дублируем).
+    // Если base пришёл из текстового поля — не дублируем то, что уже в человеко-
+    // читаемом тексте. Для записей без текста base — «остаток» без этих полей
+    // (CONSUMED_KEYS), поэтому чипы строим всегда: структурный JSON обогащается так
+    // же, как лог с message.
     const hasText = TEXT_KEYS.some((k) => typeof rec[k] === "string" && rec[k]);
-    if (hasText) out.sql = sqlSnippetOf(rec);
+    const inText = (v) => hasText && v !== "" && base.includes(String(v));
+
+    out.sql = sqlSnippetOf(rec);   // sql исключён из base → дублирования нет
 
     const methodRaw = fieldOf(rec, METHOD_KEYS);
     const url = fieldOf(rec, URL_KEYS);
     const status = fieldOf(rec, STATUS_KEYS);
 
-    if (url && !inBase(url)) out.url = url;
+    if (url && !inText(url)) out.url = url;
     // метод показываем как «ось» только рядом с путём (или когда поля url нет вовсе)
     if (methodRaw && HTTP_VERB.test(methodRaw) && (out.url || !url)) out.method = methodRaw.toUpperCase();
-    if (status && !inBase(status)) out.status = String(status);
+    if (status && !inText(status)) out.status = String(status);
 
     for (const k of NS_DUR_KEYS) {
       if (rec[k] != null && rec[k] !== "") { out.dur = fmtNanos(rec[k]); break; }
@@ -284,7 +322,7 @@
 
   return {
     LEVEL_RE, TEXT_KEYS, TS_KEYS, SRC_KEYS, REQ_KEYS,
-    norm, levelOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, summaryOf, sqlSnippetOf, fmtNanos, recordToLine,
+    norm, levelOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, summaryOf, sqlOf, sqlSnippetOf, fmtNanos, recordToLine,
     buildQuery, isEmptyQuery, matchesQuery, highlightSegments, crossContext,
   };
 });
