@@ -123,8 +123,9 @@ class FormatDetector:
         if json_format:
             return json_format
 
-        # 2. Проверяем CSV / TSV
-        csv_format = self._detect_csv(sample)
+        # 2. Проверяем CSV / TSV. Сначала csv.reader на сыром тексте (устойчив к
+        #    многострочным полям), затем — выборочная проверка как фолбэк.
+        csv_format = self._detect_csv_raw(stripped) or self._detect_csv(sample)
         if csv_format:
             return csv_format
 
@@ -248,6 +249,45 @@ class FormatDetector:
             except csv.Error:
                 continue
 
+        return None
+
+    def _detect_csv_raw(self, data: str) -> Optional[LogFormat]:
+        """CSV-детекция поверх csv.reader на СЫРОМ тексте — устойчива к полям с
+        переводами строк (трассировки/JSON в колонке message).
+
+        Наивный split('\\n') в detect() рвёт закавыченные многострочные поля, и
+        валидный CSV-экспорт (напр. Kibana с трейсбэком в первых строках) уезжал в
+        текстовый путь — а там reg-эвристики выдают мусор (json_snippet/http_status).
+        csv.reader корректно склеивает многострочные поля, поэтому проверяем им.
+        Читаем лениво только первые logical-rows."""
+        for delimiter, fmt in [(",", LogFormat.CSV), ("\t", LogFormat.TSV), (";", LogFormat.CSV)]:
+            try:
+                reader = csv.reader(io.StringIO(data), delimiter=delimiter)
+                rows = []
+                for row in reader:
+                    rows.append(row)
+                    if len(rows) >= 12:
+                        break
+            except csv.Error:
+                continue
+            if len(rows) < 2:
+                continue
+            header = rows[0]
+            header_count = len(header)
+            if header_count < 2:
+                continue
+            if not all(self.COLUMN_NAME_PATTERN.match(h.strip()) for h in header):
+                continue
+            data_rows = [r for r in rows[1:] if r and any(c.strip() for c in r)]
+            if not data_rows:
+                continue
+            # Консистентность числа полей (последняя колонка может быть пустой/опущенной)
+            consistent = all(
+                len(r) == header_count or len(r) == header_count - 1
+                for r in data_rows
+            )
+            if consistent:
+                return fmt
         return None
 
     def _detect_loki_nginx(self, sample: list) -> Optional[LogFormat]:

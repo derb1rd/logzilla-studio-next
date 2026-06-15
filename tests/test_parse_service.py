@@ -76,6 +76,51 @@ def test_elastic_csv_with_at_timestamp_detected_and_expanded():
     assert any(r.get("sql") for r in res.records)
 
 
+def test_kibana_csv_warning_with_commas_quotes_parens():
+    """Реальная WARNING-запись клиента: message c запятыми, одинарными кавычками,
+    скобками и datetime(...) внутри. Должна разобраться как csv и раскрыться в
+    структуру (level=WARNING, читаемый текст), а не уехать в текстовый путь, где
+    эвристики выдают мусор (http_status=['288','148','047'], json_snippet, raw)."""
+    msg = (
+        "ВР 9584 находится в статусе error! Запрос UpdateRuleStatus(disclosure_id=9584, "
+        "calculation_id=148, org_unit='198349', rule_id=5397, step=, "
+        "reason='Расчет ВР в статусе error.', time=datetime.datetime(1970, 1, 1, 0, 0), "
+        "headers=None) не будет обработан."
+    )
+    csv_text = (
+        '"@timestamp","env","message"\n'
+        '"Jun 5, 2026 @ 19:51:55.288","preprod","{""level"": ""WARNING"", ""message"": ""'
+        + msg + '"", ""service_name"": ""drills""}"'
+    )
+    res = parse(_inline(csv_text, expand_message=True))
+    assert res.format_detected == "csv"
+    rec = res.records[0]
+    assert rec.get("level") == "WARNING"
+    assert rec.get("message") == msg          # человеческий текст, не мусор
+    assert rec.get("service_name") == "drills"
+    # признаки текстового пути ОТСУТСТВУЮТ
+    assert "json_snippet" not in rec and "http_status" not in rec and "raw" not in rec
+
+
+def test_csv_with_multiline_field_detected_and_preserved():
+    """Поле message с сырым переводом строки (трассировка) в первых строках раньше
+    рвало наивный split('\\n') в детекторе → файл уезжал в мусорный текст-путь.
+    csv.reader-детекция склеивает многострочное поле: формат csv, все записи целы."""
+    csv_text = (
+        '"@timestamp","env","message"\n'
+        '"Jun 5 @ 19:00","preprod","{""level"": ""ERROR"", ""trace"": ""Traceback:\n'
+        '  File a, line 1\n  File b, line 2""}"\n'
+        '"Jun 5 @ 19:01","preprod","{""level"": ""INFO"", ""msg"": ""after""}"'
+    )
+    res = parse(_inline(csv_text, expand_message=True))
+    assert res.format_detected == "csv"
+    assert len(res.records) == 2               # запись с трейсом не потеряна
+    # вторая запись раскрылась штатно
+    assert res.records[1].get("level") == "INFO"
+    # признаков текстового пути нет ни в одной записи
+    assert all("json_snippet" not in r and "raw" not in r for r in res.records)
+
+
 def test_determinism_same_input_same_output():
     a = parse(_inline(SYSLOG)).to_dict()
     b = parse(_inline(SYSLOG)).to_dict()
