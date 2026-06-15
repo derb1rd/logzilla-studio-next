@@ -37,7 +37,14 @@ rsync -a --exclude='__pycache__' "$HERE/web" "$DIST/"
 # --- 3. vendor (ядро + sqlparse) — как есть, без тестов и кэша ------------
 # Ядро использует sqlparse лишь для «красивого» форматирования SQL и корректно
 # деградирует без него; если sqlparse в vendor/ нет — папка всё равно рабочая.
-rsync -a --exclude='__pycache__' --exclude='tests' "$HERE/vendor/logZilla3000" "$DIST/vendor/"
+#
+# Точки входа standalone-ядра (gui.py/cli.py/__main__.py) в раздачу НЕ кладём:
+# studio их не импортирует (использует parser/detectors), а gui.py тянет
+# незавендоренный tkinterdnd2 — в сборке это лишь мёртвый код со сломанной
+# зависимостью. Исходник в vendor/ остаётся нетронутым.
+rsync -a --exclude='__pycache__' --exclude='tests' \
+      --exclude='gui.py' --exclude='cli.py' --exclude='__main__.py' \
+      "$HERE/vendor/logZilla3000" "$DIST/vendor/"
 if [ -d "$HERE/vendor/sqlparse" ]; then
   rsync -a --exclude='__pycache__' "$HERE/vendor/sqlparse" "$DIST/vendor/"
 else
