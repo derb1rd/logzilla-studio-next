@@ -14,7 +14,7 @@
   const LEVEL_RE = /\b(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL|TRACE)\b/i;
   const TEXT_KEYS = ["raw", "message", "msg", "line", "text", "log"];
   const TS_KEYS = ["timestamp_iso", "timestamp", "time", "ts", "datetime", "date"];
-  const SRC_KEYS = ["source", "src", "logger", "service", "module", "name", "channel", "host"];
+  const SRC_KEYS = ["source", "src", "logger", "service", "service_name", "module", "name", "channel", "host"];
   const HTTP_VERB = /^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|CONNECT)$/i;
   const REQ_KEYS = [
     "req_id", "request_id", "requestId", "correlation_id", "correlationId",

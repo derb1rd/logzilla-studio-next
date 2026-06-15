@@ -22,6 +22,7 @@ test("levelOf: структурное поле и вытяжка из raw", () =
 
 test("sourceOf: поле, компонент из текста, отброс HTTP-глаголов", () => {
   assert.equal(LZ.sourceOf({ service: "api" }), "api");
+  assert.equal(LZ.sourceOf({ service_name: "drills" }), "drills");  // ECS/zap-поле
   assert.equal(LZ.sourceOf(txt("2026 ERROR api-gateway boom")), "api-gateway");
   assert.equal(LZ.sourceOf(txt("2026 INFO POST /v2/checkout 200")), "", "HTTP-глагол не источник");
   assert.equal(LZ.sourceOf(txt("2026 INFO no level component")), "no");  // токен после уровня
