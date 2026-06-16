@@ -46,6 +46,15 @@ test("sourceOf: поле, компонент из текста, отброс HTT
   assert.equal(LZ.sourceOf({ message: "no level here" }), "");
 });
 
+test("sourceOf: фолбэк в _meta (инфраструктура свёрнута)", () => {
+  // После свёртки инфраструктуры service_name уезжает в _meta — источник как ось
+  // предпросмотра всё равно должен находиться (иначе stderr-строки давали «—»).
+  assert.equal(LZ.sourceOf({ log: "Flags:", _meta: { kubernetes_labels_service_name: "n3-documents" } }), "n3-documents");
+  assert.equal(LZ.sourceOf({ msg: "ok", _meta: { kubernetes_container_name: "back" } }), "back");
+  // Топ-уровневое поле в приоритете над _meta.
+  assert.equal(LZ.sourceOf({ service_name: "top", _meta: { kubernetes_labels_service_name: "meta" } }), "top");
+});
+
 test("reqIdOf: поля-синонимы, текст, короткий id, отсутствие", () => {
   assert.equal(LZ.reqIdOf({ trace_id: "7f3a-9c41" }), "7f3a-9c41");
   assert.equal(LZ.reqIdOf({ requestId: "X9" }), "X9");

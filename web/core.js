@@ -14,7 +14,14 @@
   const LEVEL_RE = /\b(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL|TRACE)\b/i;
   const TEXT_KEYS = ["raw", "message", "msg", "line", "text", "log"];
   const TS_KEYS = ["timestamp_iso", "timestamp", "time", "ts", "datetime", "date"];
-  const SRC_KEYS = ["source", "src", "logger", "service", "service_name", "module", "name", "channel", "host"];
+  // Источник/компонент. Кроме классических полей — k8s/контейнерные имена,
+  // которые после свёртки инфраструктуры лежат в _meta (fieldOf ищет и там).
+  const SRC_KEYS = [
+    "source", "src", "logger", "service", "service_name", "module", "name", "channel",
+    "app", "container_name", "service_instance",
+    "kubernetes_labels_service_name", "kubernetes_labels_app_name",
+    "kubernetes_container_name", "kubernetes_pod_name", "host",
+  ];
   const HTTP_VERB = /^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE|CONNECT)$/i;
   const REQ_KEYS = [
     "req_id", "request_id", "requestId", "correlation_id", "correlationId",
@@ -115,6 +122,16 @@
       const v = rec[k];
       if (typeof v === "string" && v) return v;
       if (typeof v === "number") return String(v);
+    }
+    // Фолбэк в _meta: после свёртки инфраструктуры источник/служебные поля
+    // (service_name, k8s-имена) уезжают туда — но как ось предпросмотра они нужны.
+    const meta = rec._meta;
+    if (meta && typeof meta === "object") {
+      for (const k of keys) {
+        const v = meta[k];
+        if (typeof v === "string" && v) return v;
+        if (typeof v === "number") return String(v);
+      }
     }
     return "";
   }
