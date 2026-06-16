@@ -22,6 +22,7 @@ class LogFormat(Enum):
     NGINX = "nginx"
     LOKI_NGINX = "loki_nginx"
     SYSLOG = "syslog"
+    LOGFMT = "logfmt"  # key=value пары (Go/Grafana/Heroku/systemd)
     TEXT = "text"  # Произвольный текстовый лог
     UNKNOWN = "unknown"
 
@@ -41,6 +42,28 @@ class FormatDetector:
             r'^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+(\S+?)(?:\[\d+\])?:\s+(.*)'
         ),
     }
+
+    # rsyslog/systemd RFC3339-syslog: ISO-TS(с 'T') HOST APP[pid]: MSG.
+    # 'T' и структура 'host app:' отличают его от обычных app-логов с ISO-датой.
+    SYSLOG_ISO = re.compile(
+        r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\S*\s+'
+        r'\S+\s+[\w./\-]+(?:\[\d+\])?:\s+\S'
+    )
+
+    # RFC5424 syslog: <PRI>VERSION ISO-TIMESTAMP HOST APP PROCID MSGID ...
+    # Пример: <34>1 2003-10-11T22:14:15.003Z mymachine.example.com su 1234 ID47 - msg
+    SYSLOG_RFC5424 = re.compile(
+        r'^<(\d{1,3})>\d{1,2}\s+'
+        r'(?:-|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\S*)\s+'
+        r'\S+\s+\S+\s+\S+\s+\S+'
+    )
+
+    # logfmt: пара key=value (значение опц. в кавычках). Используется и детектором,
+    # и конвертером. Ключ — идентификатор; значение — "..."/'...'/токен без пробелов.
+    LOGFMT_PAIR = re.compile(
+        r'([A-Za-z_][\w.\-]*)='
+        r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^\s"\']*)'
+    )
 
     # Паттерны для определения Loki-prefixed nginx логов
     LOKI_TS_PREFIX = re.compile(
@@ -78,6 +101,19 @@ class FormatDetector:
 
     # Имя одной колонки (проверяется после снятия кавычек csv.reader'ом).
     COLUMN_NAME_PATTERN = re.compile(r"^@?[a-zA-Z_][\w.\-]*$")
+
+    # Имя-метка с пробелами/пунктуацией: реальные экспорты сплошь такие
+    # («Request Time», «Duration (ms)», «p95/p99», «error %»). Раньше такой
+    # заголовок не матчился строгим паттерном → весь файл уезжал в текстовый путь.
+    # Длину и число слов ограничиваем, чтобы прозу со случайными запятыми
+    # («Hello, world, this is text») не принять за CSV.
+    COLUMN_LABEL_PATTERN = re.compile(r"^@?[\"']?[A-Za-z_][\w .()\-/%:#@+]*[\"']?$")
+
+    # Ячейка-«число или дата» — сильный признак таблицы (для guard'а ниже).
+    _CELL_NUMBER = re.compile(r"^[+-]?(?:\d+(?:[.,]\d+)?|\.\d+)(?:[eE][+-]?\d+)?$")
+    _CELL_DATE = re.compile(
+        r"^(?:\d{4}-\d{2}-\d{2}|\d{1,2}[/.]\d{1,2}[/.]\d{2,4}|\d{1,2}:\d{2}:\d{2})"
+    )
 
     def __init__(self, sample_size: int = 50):
         """
@@ -134,7 +170,17 @@ class FormatDetector:
         if loki_nginx:
             return loki_nginx
 
-        # 3. Проверяем известные форматы (Nginx перед Apache, т.к. Apache паттерн тоже матчит Nginx)
+        # 3. Проверяем известные форматы (Nginx перед Apache, т.к. Apache паттерн тоже матчит Nginx).
+        #    RFC5424-syslog проверяем отдельно: у него собственная грамматика с <PRI>.
+        non_empty_sample = [l for l in (s.strip() for s in sample) if l]
+        if non_empty_sample:
+            rfc5424 = sum(1 for line in non_empty_sample if self.SYSLOG_RFC5424.match(line))
+            if rfc5424 >= len(non_empty_sample) * 0.6:
+                return LogFormat.SYSLOG
+            iso_syslog = sum(1 for line in non_empty_sample if self.SYSLOG_ISO.match(line))
+            if iso_syslog >= len(non_empty_sample) * 0.6:
+                return LogFormat.SYSLOG
+
         check_order = [
             LogFormat.NGINX, LogFormat.APACHE, LogFormat.SYSLOG,
         ]
@@ -143,6 +189,12 @@ class FormatDetector:
             matches = sum(1 for line in sample if pattern.match(line.strip()))
             if matches >= len(sample) * 0.6:  # 60% совпадений достаточно
                 return fmt
+
+        # 3.5. logfmt (key=value). Проверяем ПОСЛЕ табличных/web-форматов, но до
+        #      эвристики «есть уровень → текст»: иначе строки logfmt с level=...
+        #      ушли бы в text и потеряли структуру пар.
+        if self._detect_logfmt(non_empty_sample):
+            return LogFormat.LOGFMT
 
         # 4. Проверяем наличие уровня логирования (признак структурированного лога)
         level_matches = sum(
@@ -237,15 +289,22 @@ class FormatDetector:
                 if header_count < 2:
                     continue
                 # Заголовок должен состоять из имён-колонок (после снятия кавычек)
-                if not all(self.COLUMN_NAME_PATTERN.match(h.strip()) for h in header):
+                ok, has_spacey = self._header_cells_ok(header)
+                if not ok:
                     continue
                 # Консистентность количества полей в data-строках
+                data_rows = rows[1:]
                 consistent = all(
                     len(row) == header_count or len(row) == header_count - 1
-                    for row in rows[1:]
+                    for row in data_rows
                 )
-                if consistent:
-                    return fmt
+                if not consistent:
+                    continue
+                # Заголовок с пробелами → требуем признак таблицы (число/дата),
+                # иначе прозу со случайными запятыми приняли бы за CSV.
+                if has_spacey and not self._looks_tabular(data_rows, header_count):
+                    continue
+                return fmt
             except csv.Error:
                 continue
 
@@ -276,7 +335,8 @@ class FormatDetector:
             header_count = len(header)
             if header_count < 2:
                 continue
-            if not all(self.COLUMN_NAME_PATTERN.match(h.strip()) for h in header):
+            ok, has_spacey = self._header_cells_ok(header)
+            if not ok:
                 continue
             data_rows = [r for r in rows[1:] if r and any(c.strip() for c in r)]
             if not data_rows:
@@ -286,9 +346,81 @@ class FormatDetector:
                 len(r) == header_count or len(r) == header_count - 1
                 for r in data_rows
             )
-            if consistent:
-                return fmt
+            if not consistent:
+                continue
+            if has_spacey and not self._looks_tabular(data_rows, header_count):
+                continue
+            return fmt
         return None
+
+    def _header_cells_ok(self, header: list) -> tuple[bool, bool]:
+        """Валиден ли заголовок как набор имён-колонок.
+
+        Возвращает (ok, has_spacey): ok — все ячейки выглядят как имена колонок;
+        has_spacey — хотя бы одна потребовала «свободного» паттерна (есть пробел/
+        пунктуация). Для has_spacey вызывающий потребует дополнительный признак
+        таблицы, чтобы не спутать прозу с CSV.
+        """
+        has_spacey = False
+        for raw in header:
+            h = raw.strip()
+            if not h:
+                return False, has_spacey
+            if self.COLUMN_NAME_PATTERN.match(h):
+                continue
+            if len(h) <= 60 and len(h.split()) <= 6 and self.COLUMN_LABEL_PATTERN.match(h):
+                has_spacey = True
+                continue
+            return False, has_spacey
+        return True, has_spacey
+
+    def _looks_tabular(self, data_rows: list, ncols: int) -> bool:
+        """Есть ли колонка, где большинство ячеек — число или дата.
+
+        Это сильный сигнал «настоящей таблицы». Требуется только когда заголовок
+        содержит пробелы (свободный паттерн) — чтобы текст со случайными запятыми
+        не распознавался как CSV.
+        """
+        for i in range(ncols):
+            col = [r[i].strip() for r in data_rows if i < len(r) and r[i].strip()]
+            if not col:
+                continue
+            typed = sum(
+                1 for c in col
+                if self._CELL_NUMBER.match(c) or self._CELL_DATE.match(c)
+            )
+            if typed >= len(col) * 0.6:
+                return True
+        return False
+
+    def _detect_logfmt(self, non_empty: list) -> bool:
+        """logfmt-строка — это преимущественно пары key=value.
+
+        Критерий: в большинстве строк ≥2 пары key=value, и пары покрывают
+        существенную часть строки (а не одинокое foo=bar в прозе). Так мы
+        ловим Go/Grafana/Heroku/systemd-логи, но не путаем с обычным текстом,
+        где случайно затесалось `x=1`.
+        """
+        if not non_empty:
+            return False
+
+        good = 0
+        for line in non_empty:
+            # Дешёвый отсев: без '=' пар быть не может. Заодно защита от
+            # катастрофического бэктрекинга findall на длинных строках без '='
+            # (100k слов-символов → O(n²) на жадном [\w.\-]*=).
+            if "=" not in line:
+                continue
+            pairs = self.LOGFMT_PAIR.findall(line)
+            pairs = [(k, v) for k, v in pairs if k]
+            if len(pairs) < 2:
+                continue
+            # Доля символов строки, покрытая парами key=value.
+            covered = sum(len(k) + 1 + len(v) for k, v in pairs)
+            if covered >= len(line.strip()) * 0.6:
+                good += 1
+
+        return good >= len(non_empty) * 0.6
 
     def _detect_loki_nginx(self, sample: list) -> Optional[LogFormat]:
         """Проверка, является ли данные Loki-prefixed nginx логами."""

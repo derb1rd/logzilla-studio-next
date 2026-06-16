@@ -15,6 +15,7 @@ from .detectors import FormatDetector, LogFormat
 from .converters import JSONConverter
 from .sql_formatter import format_sql_fields, unescape_sql_in_json
 from .message_expander import expand_message_fields
+from .text_parser import parse_generic_line
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +349,7 @@ class UniversalLogParser:
     def _apply_filters(self, cleaned: str, fmt: LogFormat) -> str:
         """Применение фильтров по уровню и дате к очищенным данным."""
         # Фильтрация построчно (для текстовых форматов)
-        if fmt in (LogFormat.TEXT, LogFormat.APACHE, LogFormat.NGINX, LogFormat.SYSLOG, LogFormat.LOKI_NGINX):
+        if fmt in (LogFormat.TEXT, LogFormat.APACHE, LogFormat.NGINX, LogFormat.SYSLOG, LogFormat.LOKI_NGINX, LogFormat.LOGFMT):
             lines = cleaned.split("\n")
             if self.log_levels:
                 lines = self.cleaner.filter_by_level(lines, self.log_levels)
@@ -412,6 +413,9 @@ class UniversalLogParser:
         elif fmt == LogFormat.SYSLOG:
             return self.converter.convert_syslog_to_json(cleaned)
 
+        elif fmt == LogFormat.LOGFMT:
+            return self.converter.convert_logfmt_to_json(cleaned)
+
         elif fmt == LogFormat.TEXT:
             if self.pattern:
                 return self.converter.convert_text_to_json(
@@ -427,11 +431,15 @@ class UniversalLogParser:
             return self._convert_text_auto(cleaned)
 
     def _convert_text_auto(self, cleaned: str) -> list[dict[str, Any]]:
-        """Конвертация текста без паттерна — автоизвлечение полей через cleaner.
+        """Конвертация текста без паттерна — структурный разбор по «голове» строки.
 
-        Для каждой строки пытаемся извлечь структурированные поля (IP, URL,
-        timestamp и т.д.). Если поля найдены — добавляем их + raw-строку,
-        иначе — оборачиваем как {"message": line}.
+        Для каждой строки пытаемся выделить timestamp/level/thread/logger и
+        остаток как message (parse_generic_line). Если структуры нет —
+        оборачиваем строку как {"message": line}.
+
+        Раньше здесь работал extract_fields, который регэкспами выдёргивал любые
+        IP/URL/3-значные числа: миллисекунды попадали в http_status, фрагменты
+        {...} — в json_snippet. Это и был основной источник «плохого распарса».
         """
         lines = cleaned.split("\n")
         results: list[dict[str, Any]] = []
@@ -439,12 +447,8 @@ class UniversalLogParser:
             line = line.strip()
             if not line:
                 continue
-            fields = self.cleaner.extract_fields(line)
-            if fields:
-                fields["raw"] = line
-                results.append(fields)
-            else:
-                results.append({"message": line})
+            rec = parse_generic_line(line)
+            results.append(rec if rec is not None else {"message": line})
         return results
 
     def _expand_json_columns(self, result: Any, fmt: LogFormat) -> Any:
