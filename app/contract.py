@@ -240,11 +240,15 @@ class ParseResult:
 @dataclass
 class ExportOptions:
     gzip: bool = False
+    ndjson: bool = False   # по объекту на строку (грепается/диффается лучше массива)
 
     @classmethod
     def from_dict(cls, d: Any) -> "ExportOptions":
         d = _require_dict(d or {}, "export.options")
-        return cls(gzip=_as_bool(d.get("gzip"), "export.options.gzip", False))
+        return cls(
+            gzip=_as_bool(d.get("gzip"), "export.options.gzip", False),
+            ndjson=_as_bool(d.get("ndjson"), "export.options.ndjson", False),
+        )
 
 
 @dataclass

@@ -760,8 +760,8 @@ async function doExport() {
   if ($("exportScope").value === "all") return doExportAll();
   const entry = activeEntry();
   if (!entry || !entry.request) { setFooter("Сначала выполните парсинг."); return; }
-  const req = { version: "1", parse_request: entry.request, options: { gzip: $("gzip").checked } };
-  obs.action("export_clicked", { gzip: req.options.gzip, file: entry.name });
+  const req = { version: "1", parse_request: entry.request, options: { gzip: $("gzip").checked, ndjson: $("ndjson").checked } };
+  obs.action("export_clicked", { gzip: req.options.gzip, ndjson: req.options.ndjson, file: entry.name });
   setFooter("Экспорт…");
   try {
     const r = await obs.fetch("/api/export", {
@@ -773,7 +773,8 @@ async function doExport() {
       return;
     }
     const blob = await r.blob();
-    const ext = req.options.gzip ? "json.gz" : "json";
+    const base = req.options.ndjson ? "ndjson" : "json";
+    const ext = req.options.gzip ? base + ".gz" : base;
     const name = `${baseName(entry.name)}.${ext}`;
     downloadBlob(blob, name);
     if (r.headers.get("X-Truncated") === "true") {
@@ -796,16 +797,16 @@ async function doExport() {
 async function doExportAll() {
   const parsed = state.session.files.filter((f) => f.request && f.status === "parsed");
   if (!parsed.length) { setFooter("Нет распарсенных файлов для экспорта."); return; }
-  const gzip = $("gzip").checked;
-  const ext = gzip ? "json.gz" : "json";
-  obs.action("export_all_clicked", { files: parsed.length, gzip });
+  const gzip = $("gzip").checked, ndjson = $("ndjson").checked;
+  const ext = (ndjson ? "ndjson" : "json") + (gzip ? ".gz" : "");
+  obs.action("export_all_clicked", { files: parsed.length, gzip, ndjson });
   setFooter(`Экспорт файлов… (0/${parsed.length})`);
 
   const failures = [];
   let truncatedAny = false;
   for (let k = 0; k < parsed.length; k++) {
     const f = parsed[k];
-    const req = { version: "1", parse_request: f.request, options: { gzip } };
+    const req = { version: "1", parse_request: f.request, options: { gzip, ndjson } };
     try {
       const r = await obs.fetch("/api/export", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req),
@@ -848,7 +849,7 @@ function baseName(name) {
 
 // --- prefs (localStorage) ---------------------------------------------------
 const PREFS_KEY = "logzilla-studio-next.prefs.v1";
-const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "gzip"];
+const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "gzip", "ndjson"];
 
 function savePrefs() {
   const prefs = {

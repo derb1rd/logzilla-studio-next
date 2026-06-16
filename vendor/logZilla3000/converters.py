@@ -35,6 +35,14 @@ def _finite_float(token: str) -> Any:
     return f if math.isfinite(f) else None
 
 
+def _loads_finite(s: str) -> Any:
+    """json.loads со страховкой строгого JSON на выходе: переполнения (1e999→inf)
+    и литералы Infinity/-Infinity/NaN → None. Иначе на входе-JSON с такими
+    значениями выход содержал бы inf/nan → невалидный для браузера/строгих парсеров
+    JSON (и падение allow_nan=False при экспорте)."""
+    return json.loads(s, parse_constant=lambda _c: None, parse_float=_finite_float)
+
+
 # logfmt: key=value, значение опц. в кавычках. Дублирует паттерн детектора, чтобы
 # конвертер не зависел от модуля detectors (избегаем циклического импорта).
 _LOGFMT_PAIR = re.compile(
@@ -169,11 +177,11 @@ class JSONConverter:
             if not line:
                 continue
             try:
-                obj = json.loads(line)
+                obj = _loads_finite(line)
                 if self.normalize_keys and isinstance(obj, dict):
                     obj = self._normalize_dict_keys(obj)
                 result.append(obj)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, ValueError):
                 # Пропускаем невалидные строки
                 continue
         return result
@@ -189,8 +197,8 @@ class JSONConverter:
             Нормализованный Python-объект
         """
         try:
-            obj = json.loads(data)
-        except json.JSONDecodeError:
+            obj = _loads_finite(data)
+        except (json.JSONDecodeError, ValueError):
             # Если не удалось распарсить как единый JSON,
             # пробуем как JSONL (по строкам)
             return self.convert_jsonl_to_json(data)
