@@ -285,6 +285,33 @@ class TestGroupInfra(unittest.TestCase):
         self.assertEqual(self.group([rec])[0], rec)
 
 
+class TestReframeTabular(unittest.TestCase):
+    """Толерантное обрамление: снятие over-quoting + пропуск преамбулы."""
+
+    def setUp(self):
+        from logZilla3000.cleaners import reframe_tabular
+        self.reframe = reframe_tabular
+
+    def test_unwrap_overquoting(self):
+        wrapped = '"ts,""level"""\n"2026-01-01,""INFO"""'
+        out = self.reframe(wrapped)
+        self.assertEqual(out.splitlines()[0], 'ts,"level"')
+        self.assertEqual(out.splitlines()[1], '2026-01-01,"INFO"')
+
+    def test_skip_preamble_to_header(self):
+        text = "# comment\nЗаголовок отчёта\nts,level,msg\n1,INFO,ok"
+        out = self.reframe(text)
+        self.assertTrue(out.startswith("ts,level,msg"))
+
+    def test_noop_for_plain_csv(self):
+        text = "ts,level,msg\n1,INFO,ok"
+        self.assertEqual(self.reframe(text), text)
+
+    def test_noop_for_plain_text(self):
+        text = "2026-01-01 INFO started\n2026-01-01 ERROR boom"
+        self.assertEqual(self.reframe(text), text)
+
+
 class TestPerformance(unittest.TestCase):
     def test_long_line_no_backtracking(self):
         """Длинная строка без '=' не должна вызывать катастрофический бэктрекинг."""

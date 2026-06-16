@@ -108,6 +108,19 @@ CASES: list[dict] = [
         "checks": {"duration_ms": 12.5},
     },
     {
+        # Over-quoted экспорт (вся строка в кавычках + хвостовой ;) с титульной
+        # преамбулой — реальный артефакт ре-сейва. Рамка снимает обёртку и
+        # пропускает преамбулу → нормальный CSV.
+        "name": "csv-overquoted-with-preamble",
+        "raw": 'Отчёт по сервису;\n;\n'
+               '"ts,""level"",""msg""";\n'
+               '"2026-01-01,""INFO"",""ok""";\n'
+               '"2026-01-01,""ERROR"",""boom"""',
+        "fmt": "csv",
+        "checks": {"level": "INFO", "msg": "ok"},
+        "count": 2,
+    },
+    {
         "name": "csv-trailing-empty-col",
         "raw": "a,b,c\n1,2,\n3,4,",
         "fmt": "csv",

@@ -11,6 +11,8 @@ import io
 from enum import Enum
 from typing import Optional
 
+from .cleaners import reframe_tabular
+
 
 class LogFormat(Enum):
     """Поддерживаемые форматы логов."""
@@ -159,9 +161,14 @@ class FormatDetector:
         if json_format:
             return json_format
 
-        # 2. Проверяем CSV / TSV. Сначала csv.reader на сыром тексте (устойчив к
-        #    многострочным полям), затем — выборочная проверка как фолбэк.
-        csv_format = self._detect_csv_raw(stripped) or self._detect_csv(sample)
+        # 2. Проверяем CSV / TSV на ОБРАМЛЁННОМ тексте (снятие over-quoting +
+        #    пропуск преамбулы), чтобы обёрнутые/с-титулом экспорты не уезжали в
+        #    текст. Сначала csv.reader на сыром тексте (устойчив к многострочным
+        #    полям), затем — выборочная проверка как фолбэк.
+        reframed = reframe_tabular(stripped)
+        csv_format = self._detect_csv_raw(reframed) or self._detect_csv(
+            reframed.split("\n")[: self.sample_size]
+        )
         if csv_format:
             return csv_format
 

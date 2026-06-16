@@ -6,12 +6,74 @@
 """
 
 import re
+import csv
+import io
 import html
 import logging
 from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Строка-обёртка: одно закавыченное поле + опц. хвостовой разделитель ( "..."; ).
+# Признак over-quoted/двойно-обёрнутого экспорта (вся CSV-строка взята в кавычки).
+_OVERQUOTE_RE = re.compile(r'^\s*"((?:[^"]|"")*)"\s*[;,\t]?\s*$')
+_DELIMS = (",", ";", "\t", "|")
+# Имя-колонка (после снятия кавычек): латиница/@/_ в начале, допускаем пробелы и
+# типичную пунктуацию меток. Кириллический титул («лог первого…») сюда НЕ подходит.
+_COL_NAME_RE = re.compile(r'^@?["\']?[A-Za-z_][\w .()\-/%:#@+]*["\']?$')
+
+
+def _is_header_like(line: str) -> bool:
+    """Строка похожа на CSV-шапку: под каким-то разделителем ≥2 непустых поля,
+    и все они — имена-колонки (а не предложение/мусор)."""
+    for d in _DELIMS:
+        if d not in line:
+            continue
+        try:
+            row = next(csv.reader(io.StringIO(line), delimiter=d), [])
+        except csv.Error:
+            continue
+        cells = [c.strip() for c in row if c.strip()]
+        if len(cells) >= 2 and all(_COL_NAME_RE.match(c) for c in cells):
+            return True
+    return False
+
+
+def reframe_tabular(text: str) -> str:
+    """Толерантное обрамление таблицы перед детекцией/конвертацией CSV.
+
+    1. Снятие over-quoting: если большинство строк — одно закавыченное поле
+       (+ хвостовой разделитель), снимаем внешний слой кавычек (un-double `""`→`"`)
+       — частый артефакт ре-сейва экспорта (вся строка обёрнута как одна ячейка).
+    2. Пропуск преамбулы: отбрасываем ведущие строки без разделителя (заголовок-
+       титул, комментарии, метаданные) до первой строки, похожей на CSV-шапку.
+
+    Консервативно и идемпотентно: если признаков нет — возвращает текст как есть
+    (no-op для нормальных CSV).
+    """
+    lines = text.split("\n")
+    non_empty = [ln for ln in lines if ln.strip()]
+    if len(non_empty) < 2:
+        return text
+
+    # 1. Over-quoting → снять внешний слой.
+    wrapped = sum(1 for ln in non_empty if _OVERQUOTE_RE.match(ln))
+    if wrapped >= len(non_empty) * 0.6:
+        out = []
+        for ln in lines:
+            m = _OVERQUOTE_RE.match(ln) if ln.strip() else None
+            out.append(m.group(1).replace('""', '"') if m else ln)
+        lines = out
+
+    # 2. Пропуск преамбулы: режем ведущие строки (титул/комментарий/метаданные)
+    #    до первой ПОХОЖЕЙ НА ШАПКУ строки (≥2 имени-колонки). Если шапка на первой
+    #    строке или её нет вовсе — не трогаем (no-op для обычных CSV и текста).
+    hdr = next((i for i, ln in enumerate(lines) if ln.strip() and _is_header_like(ln)), None)
+    if hdr and hdr > 0:
+        lines = lines[hdr:]
+
+    return "\n".join(lines)
 
 
 class LogCleaner:
@@ -221,6 +283,7 @@ class LogCleaner:
         result = self.GARBAGE_PATTERNS[3].sub("", content)   # BOM
         result = self.GARBAGE_PATTERNS[4].sub("", result)    # нулевые байты
         result = self.GARBAGE_PATTERNS[5].sub("", result)    # управляющие символы
+        result = reframe_tabular(result)                     # снять обёртку + преамбулу
         lines = [ln for ln in result.split("\n") if ln.strip()]
         return "\n".join(lines)
 
