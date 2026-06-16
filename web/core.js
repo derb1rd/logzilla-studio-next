@@ -67,6 +67,18 @@
   // с серверными метриками.
   const LEVEL_KEYS = ["level", "levelname", "log_level", "loglevel", "severity", "lvl"];
 
+  // Числовой уровень → имя. Частый источник «пустого» уровня в структурных логах:
+  // RFC5424/GELF severity (0–7, меньше = severe) и pino/bunyan level (10–60, больше
+  // = severe). Диапазон значения сам разводит две шкалы (pino начинается с 10).
+  const SYSLOG_SEVERITY = ["FATAL", "FATAL", "CRITICAL", "ERROR", "WARN", "INFO", "INFO", "DEBUG"];
+  const PINO_LEVELS = { 10: "TRACE", 20: "DEBUG", 30: "INFO", 40: "WARN", 50: "ERROR", 60: "FATAL" };
+  function levelFromNumber(n) {
+    if (!Number.isInteger(n)) return "";
+    if (n >= 0 && n <= 7) return SYSLOG_SEVERITY[n];
+    if (n >= 10 && n <= 60) return PINO_LEVELS[Math.min(60, Math.round(n / 10) * 10)] || "";
+    return "";
+  }
+
   // Ключи, которые предпросмотр показывает отдельными осями (время/уровень/источник/
   // req_id/HTTP-метод/путь/статус/длительность/SQL). В «остаток» base (msgOf для
   // записей без текстового поля) их не включаем — иначе строка дублирует цветные
@@ -80,9 +92,13 @@
   function levelOf(record) {
     if (record == null || typeof record !== "object") return "";
     for (const k of LEVEL_KEYS) {
-      if (typeof record[k] === "string") {
-        const mm = record[k].match(LEVEL_RE);
+      const v = record[k];
+      if (typeof v === "string") {
+        const mm = v.match(LEVEL_RE);
         if (mm) return norm(mm[1]);
+      } else if (typeof v === "number") {
+        const lv = levelFromNumber(v);
+        if (lv) return lv;
       }
     }
     for (const k of TEXT_KEYS) {

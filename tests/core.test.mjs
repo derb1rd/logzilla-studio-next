@@ -20,6 +20,23 @@ test("levelOf: структурное поле и вытяжка из raw", () =
   assert.equal(LZ.levelOf({ lvl: "warn" }), "WARN");               // ключ lvl поддержан
 });
 
+test("levelOf: числовой уровень/severity (syslog/GELF/pino)", () => {
+  // RFC5424/GELF severity 0–7 (меньше = severe) — раньше показывали «—».
+  assert.equal(LZ.levelOf({ severity: 3 }), "ERROR");
+  assert.equal(LZ.levelOf({ severity: 4 }), "WARN");
+  assert.equal(LZ.levelOf({ severity: 6 }), "INFO");
+  assert.equal(LZ.levelOf({ severity: 0 }), "FATAL");
+  // pino/bunyan level 10–60 (больше = severe).
+  assert.equal(LZ.levelOf({ level: 30 }), "INFO");
+  assert.equal(LZ.levelOf({ level: 50 }), "ERROR");
+  assert.equal(LZ.levelOf({ level: 60 }), "FATAL");
+  // Мусорные/внедиапазонные числа не дают ложного уровня.
+  assert.equal(LZ.levelOf({ level: 200 }), "");
+  assert.equal(LZ.levelOf({ level: true }), "");                   // bool не число-уровень
+  // Строковый уровень по-прежнему в приоритете.
+  assert.equal(LZ.levelOf({ level: "ERROR", severity: 6 }), "ERROR");
+});
+
 test("sourceOf: поле, компонент из текста, отброс HTTP-глаголов", () => {
   assert.equal(LZ.sourceOf({ service: "api" }), "api");
   assert.equal(LZ.sourceOf({ service_name: "drills" }), "drills");  // ECS/zap-поле

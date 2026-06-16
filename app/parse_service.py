@@ -54,6 +54,22 @@ def _level_token(value: str) -> str | None:
     return "WARN" if lvl == "WARNING" else lvl
 
 
+# Числовой уровень → имя (зеркало web/core.js levelFromNumber): RFC5424/GELF
+# severity (0–7) и pino/bunyan level (10–60). Диапазон разводит две шкалы.
+_SYSLOG_SEVERITY = ("FATAL", "FATAL", "CRITICAL", "ERROR", "WARN", "INFO", "INFO", "DEBUG")
+_PINO_LEVELS = {10: "TRACE", 20: "DEBUG", 30: "INFO", 40: "WARN", 50: "ERROR", 60: "FATAL"}
+
+
+def _level_from_number(n: object) -> str | None:
+    if not isinstance(n, int) or isinstance(n, bool):
+        return None
+    if 0 <= n <= 7:
+        return _SYSLOG_SEVERITY[n]
+    if 10 <= n <= 60:
+        return _PINO_LEVELS.get(min(60, round(n / 10) * 10))
+    return None
+
+
 def _record_level(record: dict) -> str | None:
     """Определяет уровень записи: сначала по явному полю уровня, затем по тексту строки лога.
 
@@ -66,6 +82,10 @@ def _record_level(record: dict) -> str | None:
         v = record.get(key)
         if isinstance(v, str):
             lvl = _level_token(v)
+            if lvl:
+                return lvl
+        elif isinstance(v, int) and not isinstance(v, bool):
+            lvl = _level_from_number(v)
             if lvl:
                 return lvl
     for key in _TEXT_KEYS:
