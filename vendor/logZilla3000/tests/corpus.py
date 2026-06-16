@@ -301,6 +301,17 @@ CASES: list[dict] = [
         "count": 2,
     },
 
+    {
+        # JSONL, где поле — JSON-строка: рекурсивное вскрытие достаёт объект
+        # (OpenSearch/ECS-экспорты сплошь так: event.original/_source строкой).
+        "name": "jsonl-nested-json-string-field",
+        "raw": '{"ts":"2026-01-01T00:00:00Z","level":"INFO","payload":"{\\"name\\":\\"a\\",\\"rows\\":5}"}\n'
+               '{"ts":"2026-01-01T00:00:01Z","level":"ERROR","payload":"{\\"name\\":\\"b\\",\\"rows\\":0}"}',
+        "fmt": "jsonl",
+        "checks": {"level": "INFO", "payload": {"name": "a", "rows": 5}},
+        "count": 2,
+    },
+
     # ============================ анти-кейсы ============================
     # Проза со случайными запятыми НЕ должна стать CSV.
     {

@@ -14,7 +14,7 @@ from .cleaners import LogCleaner
 from .detectors import FormatDetector, LogFormat
 from .converters import JSONConverter
 from .sql_formatter import format_sql_fields, unescape_sql_in_json
-from .message_expander import expand_message_fields
+from .message_expander import expand_message_fields, deep_expand
 from .text_parser import parse_generic_line, is_export_metadata
 
 logger = logging.getLogger(__name__)
@@ -211,6 +211,9 @@ class UniversalLogParser:
         # 5. Распаковка JSON-колонок (CSV/TSV) + раскрытие вложенных JSON в message
         result = self._expand_json_columns(result, fmt)
         result = expand_message_fields(result, enabled=self.expand_message)
+        # 5b. Рекурсивное вскрытие структуры: достаём JSON, зарытый в любой строковой
+        #     колонке/поле (event.original, _source, вложенный JSON-в-строке).
+        result = deep_expand(result, enabled=self.expand_message)
 
         # 6. SQL-форматирование
         result = format_sql_fields(result, enabled=self.format_sql)
@@ -280,6 +283,7 @@ class UniversalLogParser:
         result = self._convert(cleaned, fmt)
         result = self._expand_json_columns(result, fmt)
         result = expand_message_fields(result, enabled=self.expand_message)
+        result = deep_expand(result, enabled=self.expand_message)
         result = format_sql_fields(result, enabled=self.format_sql)
         return result
 

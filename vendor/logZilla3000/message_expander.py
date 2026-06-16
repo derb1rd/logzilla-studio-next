@@ -521,3 +521,48 @@ def expand_message_fields(
         return [expand_message_fields(item, enabled=True, noise_fields=noise) for item in data]
 
     return data
+
+
+# Потолок глубины рекурсивного вскрытия — защита от патологически вложенных данных
+# и переполнения стека. 8 уровней с запасом покрывают реальные экспорты
+# (csv→event.original→logging-envelope→payload).
+_MAX_RECOVER_DEPTH = 8
+
+
+def deep_expand(data: Any, enabled: bool = True) -> Any:
+    """Рекурсивное «вскрытие структуры»: единый приём против «structure buried under
+    wrappers».
+
+    Любое СТРОКОВОЕ значение, которое целиком является JSON-объектом/массивом (или
+    Python-repr dict), парсится и раскрывается дальше — пока не упрёмся в примитивы.
+    Так одна операция вытаскивает структуру из CSV-колонки с JSON, из event.original,
+    из _source, из вложенного JSON-в-строке, из Loki-payload — независимо от того,
+    сколько слоёв обёртки сверху.
+
+    Консервативно: разворачиваем только строку, ЦЕЛИКОМ являющуюся JSON (начинается с
+    `{`/`[`), а не любой текст с фрагментом {…} внутри — иначе ловили бы ложные
+    срабатывания в сообщениях. Глубина ограничена _MAX_RECOVER_DEPTH.
+    """
+    if not enabled:
+        return data
+    return _recover(data, 0)
+
+
+def _recover(obj: Any, depth: int) -> Any:
+    if depth > _MAX_RECOVER_DEPTH:
+        return obj
+    if isinstance(obj, dict):
+        return {k: _recover(_maybe_structure(v), depth + 1) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_recover(_maybe_structure(v), depth + 1) for v in obj]
+    return obj
+
+
+def _maybe_structure(value: Any) -> Any:
+    """Строка-целиком-JSON → распарсенная структура (с декодом \\uXXXX), иначе как есть."""
+    if not isinstance(value, str):
+        return value
+    parsed = _try_parse_string_value(value)   # JSON, затем Python-repr; требует ведущий {/[
+    if isinstance(parsed, (dict, list)):
+        return _decode_unicode_escapes(parsed)
+    return value

@@ -210,6 +210,44 @@ class TestCsvHeaderLoosening(unittest.TestCase):
         self.assertEqual(FormatDetector().detect(data), LogFormat.CSV)
 
 
+class TestDeepExpand(unittest.TestCase):
+    """Рекурсивное «вскрытие структуры» — JSON, зарытый в строковых значениях."""
+
+    def setUp(self):
+        from logZilla3000.message_expander import deep_expand
+        self.deep_expand = deep_expand
+
+    def test_recovers_nested_json_string(self):
+        rec = {"a": 1, "event_original": '{"level":"ERROR","inner":"{\\"k\\":1}"}'}
+        out = self.deep_expand([rec])[0]
+        self.assertEqual(out["event_original"]["level"], "ERROR")
+        self.assertEqual(out["event_original"]["inner"], {"k": 1})  # раскрыто рекурсивно
+
+    def test_plain_text_untouched(self):
+        rec = {"msg": "hello world", "note": "см. {x} в шаблоне"}
+        out = self.deep_expand([rec])[0]
+        self.assertEqual(out["msg"], "hello world")
+        self.assertEqual(out["note"], "см. {x} в шаблоне")  # не целиком JSON → не трогаем
+
+    def test_unicode_escape_decoded(self):
+        rec = {"p": '{"msg":"\\u041e\\u0448\\u0438\\u0431\\u043a\\u0430"}'}
+        out = self.deep_expand([rec])[0]
+        self.assertEqual(out["p"]["msg"], "Ошибка")
+
+    def test_disabled_is_noop(self):
+        rec = {"x": '{"a":1}'}
+        self.assertEqual(self.deep_expand([rec], enabled=False)[0]["x"], '{"a":1}')
+
+    def test_via_parser_csv_json_column(self):
+        # CSV-колонка с JSON-строкой → рекурсивно вскрывается в объект.
+        from logZilla3000.parser import UniversalLogParser
+        data = 'ts,payload\n2026-01-01,"{""level"":""WARN"",""rows"":5}"'
+        out = UniversalLogParser().parse(data)[0]
+        # expand_json_columns поднимает поля объекта наверх → level/rows как колонки
+        self.assertEqual(out.get("level"), "WARN")
+        self.assertEqual(out.get("rows"), 5)
+
+
 class TestPerformance(unittest.TestCase):
     def test_long_line_no_backtracking(self):
         """Длинная строка без '=' не должна вызывать катастрофический бэктрекинг."""
