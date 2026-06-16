@@ -35,11 +35,6 @@ let _seq = 0;
 const newId = () => "f" + (++_seq);
 const activeEntry = () => state.session.files.find((f) => f.id === state.session.activeId) || null;
 
-// Файл-источник записи (по идентичности). Якорь контекста может жить в другом
-// файле, чем активный (cross-file трасса), — окно ±6 строим вокруг него там.
-const anchorFile = (rec) =>
-  rec ? state.session.files.find((f) => f.status === "parsed" && f.records.indexOf(rec) !== -1) || null : null;
-
 const $ = (id) => document.getElementById(id);
 // LEVEL_RE и прочий чистый слой берём из core.js (см. деструктуризацию из LZ ниже).
 
@@ -675,9 +670,9 @@ function valHtml(key, v) {
 
 // контекст — все строки того же запроса (req_id/trace_id) ПО ВСЕЙ СЕССИИ. Это и
 // есть распределённый трейс: одна ось req_id, склеивающая логи разных сервисов/
-// файлов. Если id нет — откат на соседние строки активного файла (±6). Берём из
-// полных окон state.session.files (не из отфильтрованного view), чтобы фильтр
-// уровней не рвал трассу запроса.
+// файлов. Если id нет — контекста нет (соседние строки не показываем: разные
+// процессы вперемешку → шум). Берём из полных окон state.session.files (не из
+// отфильтрованного view), чтобы фильтр уровней не рвал трассу запроса.
 function contextHtml() {
   // Контекст строится от ЯКОРЯ, а не от текущего выбора: клик по строке внутри
   // контекста меняет selectedRec, но НЕ якорь — поэтому список (и его счётчик)
@@ -685,27 +680,24 @@ function contextHtml() {
   // выборе из потока (selectRow). Фолбэк на selectedRec — для первого открытия.
   const anchor = state.contextAnchor || state.selectedRec;
   const rid = reqIdOf(anchor);
-  const active = activeEntry();
-  let label, rows;          // rows: [{ fileId, name, i, rec }]
-  if (rid) {
-    const sessionFiles = state.session.files
-      .filter((f) => f.status === "parsed")
-      .map((f) => ({ fileId: f.id, name: f.name, records: f.records }));
-    rows = crossContext(sessionFiles, rid);
-    const nFiles = new Set(rows.map((r) => r.fileId)).size;
-    label = `req_id = ${escapeHtml(rid)} · ${ru(rows.length)} строк` + (nFiles > 1 ? ` · ${nFiles} файла` : "");
-  } else {
-    // Окно ±6 центрируем на ЯКОРЕ (а не на текущем выборе) — иначе при клике по
-    // соседу окно переезжало и строки «скакали».
-    const af = anchorFile(anchor) || active;
-    const recs = af ? af.records : [];
-    const o = recs.indexOf(anchor);
-    const lo = Math.max(0, o - 6), hi = Math.min(recs.length, o + 7);
-    rows = [];
-    for (let i = lo; i < hi; i++) rows.push({ fileId: af.id, name: af.name, i, rec: recs[i] });
-    label = "нет req_id · соседние строки активного файла (±6)";
+  // Контекст = ТОЛЬКО трасса одного req_id/trace_id по всей сессии. Соседние
+  // строки не показываем: в проде логи разных процессов перемешаны, и «соседи»
+  // — случайный шум, а не контекст запроса. Нет id → честно говорим, что связать
+  // не с чем.
+  if (!rid) {
+    return `<div class="insp-empty">` +
+      emptyState("Нет req_id / trace_id",
+        "У записи нет идентификатора запроса — связать не с чем. " +
+        "Контекст показывает только строки одного req_id по всей сессии.") +
+      `</div>`;
   }
-  const multi = new Set(rows.map((r) => r.fileId)).size > 1;
+  const sessionFiles = state.session.files
+    .filter((f) => f.status === "parsed")
+    .map((f) => ({ fileId: f.id, name: f.name, records: f.records }));
+  const rows = crossContext(sessionFiles, rid);   // [{ fileId, name, i, rec }]
+  const nFiles = new Set(rows.map((r) => r.fileId)).size;
+  const label = `req_id = ${escapeHtml(rid)} · ${ru(rows.length)} строк` + (nFiles > 1 ? ` · ${nFiles} файла` : "");
+  const multi = nFiles > 1;
   let html = `<div class="histo-label">${label}</div>`;
   for (const { fileId, name, i, rec } of rows) {
     // Подсвечиваем строку, которую сейчас инспектируем (selectedRec), — она ходит
