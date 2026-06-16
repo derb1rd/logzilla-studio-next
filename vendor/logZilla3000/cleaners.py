@@ -20,8 +20,10 @@ class LogCleaner:
     # ANSI escape-последовательности (цвета, курсор и т.д.)
     ANSI_PATTERN = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\].*?\x07|\x1b\[.*?m")
 
-    # HTML-теги
-    HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+    # HTML-теги. Требуем, чтобы тег начинался с буквы, '/', '!' или '?' —
+    # иначе паттерн съедал syslog-PRI <34> (RFC5424) и угловые скобки вокруг
+    # чисел/выражений в обычных логах. Реальный HTML-тег цифрой не начинается.
+    HTML_TAG_PATTERN = re.compile(r"</?[a-zA-Z!?][^>]*>")
 
     # Дублирующиеся пробелы
     MULTIPLE_SPACES = re.compile(r" {2,}")
@@ -143,12 +145,16 @@ class LogCleaner:
         # Удаление BOM и нулевых байтов
         result = self.GARBAGE_PATTERNS[3].sub("", result)
         result = self.GARBAGE_PATTERNS[4].sub("", result)
-        # Удаление управляющих символов (кроме \n, \r, \t)
-        result = self.GARBAGE_PATTERNS[5].sub("", result)
 
-        # Удаление ANSI escape-последовательностей
+        # Удаление ANSI escape-последовательностей — ДО снятия управляющих
+        # символов: ESC (0x1B) сам попадает в диапазон управляющих, и если убрать
+        # его первым, от последовательности останется орфанный «[32m», который
+        # ANSI_PATTERN уже не сматчит (нужен ведущий ESC).
         if self.remove_ansi:
             result = self.ANSI_PATTERN.sub("", result)
+
+        # Удаление управляющих символов (кроме \n, \r, \t)
+        result = self.GARBAGE_PATTERNS[5].sub("", result)
 
         # Удаление HTML-тегов (перед декодированием сущностей)
         if self.remove_html:

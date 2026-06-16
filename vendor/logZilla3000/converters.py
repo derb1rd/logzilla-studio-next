@@ -17,14 +17,45 @@ from typing import Any, Optional
 # int()/float() трактуют '_' как разделитель разрядов, из-за чего id вроде
 # '1779287397304638751_85e89394' разбирается как 85e89394 → переполнение в inf,
 # а затем json.dumps пишет невалидный для строгих парсеров (браузер) 'Infinity'.
-_INT_RE = re.compile(r"[+-]?\d+$")
+#
+# Ведущие нули (007, 01234) НЕ коэрсятся в int: это индексы/индексы-маски,
+# почтовые индексы, телефоны, ID — срезание нулей их искажает. Поэтому _INT_RE
+# принимает либо одиночный '0', либо число без ведущего нуля. Дробная часть
+# (0.5, 0.001) — легитимна и распознаётся _FLOAT_RE.
+_INT_RE = re.compile(r"[+-]?(?:0|[1-9]\d*)$")
 _FLOAT_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+# Ведущий ноль в float без дробной части — тоже идентификатор (0123.txt не сюда,
+# но '00.5' → строка): float coerce только если нет ведущего 0 у целой части >1 цифры.
+_FLOAT_LEADING_ZERO = re.compile(r"[+-]?0\d")
 
 
 def _finite_float(token: str) -> Any:
     """parse_float для json.loads: не-финитные числа (1e999 → inf) → None."""
     f = float(token)
     return f if math.isfinite(f) else None
+
+
+# logfmt: key=value, значение опц. в кавычках. Дублирует паттерн детектора, чтобы
+# конвертер не зависел от модуля detectors (избегаем циклического импорта).
+_LOGFMT_PAIR = re.compile(
+    r'([A-Za-z_][\w.\-]*)='
+    r'("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^\s"\']*)'
+)
+
+
+def _nil(value: Optional[str]) -> Optional[str]:
+    """NILVALUE RFC5424: '-' означает отсутствие значения → None."""
+    return None if value == "-" else value
+
+
+_LOGFMT_UNESCAPE = re.compile(r"\\(.)")
+_LOGFMT_ESCAPES = {"n": "\n", "t": "\t", "r": "\r"}
+
+
+def _logfmt_unescape_repl(m: "re.Match") -> str:
+    """\\n→перевод строки, \\t→таб, \\r→возврат; \\" \\\\ и прочее → сам символ."""
+    ch = m.group(1)
+    return _LOGFMT_ESCAPES.get(ch, ch)
 
 
 class JSONConverter:
@@ -279,9 +310,38 @@ class JSONConverter:
         )
         return self.convert_text_to_json(data, pattern=pattern)
 
+    # RFC3164 (BSD) syslog: Jan 15 10:30:00 host app[pid]: message
+    _SYSLOG_BSD = re.compile(
+        r'^(?P<timestamp>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+'
+        r'(?P<host>\S+)\s+'
+        r'(?P<app>\S+?)(?:\[(?P<pid>\d+)\])?:\s+'
+        r'(?P<message>.*)$'
+    )
+    # rsyslog/systemd RFC3339-формат: ISO-TS HOST APP[pid]: MSG.
+    # Требуем 'T' в таймстампе — это отделяет syslog от space-separated app-логов
+    # (Java/Python пишут дату через пробел), и наличие 'host app:' структуры.
+    _SYSLOG_ISO = re.compile(
+        r'^(?P<timestamp>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\S*)\s+'
+        r'(?P<host>\S+)\s+'
+        r'(?P<app>[\w./\-]+?)(?:\[(?P<pid>\d+)\])?:\s+'
+        r'(?P<message>.*)$'
+    )
+    # RFC5424 syslog: <PRI>VER ISO-TS HOST APP PROCID MSGID [SD] MSG
+    _SYSLOG_RFC5424 = re.compile(
+        r'^<(?P<pri>\d{1,3})>(?P<version>\d{1,2})\s+'
+        r'(?P<timestamp>-|\S+)\s+'
+        r'(?P<host>\S+)\s+(?P<app>\S+)\s+(?P<pid>\S+)\s+(?P<msgid>\S+)\s+'
+        r'(?P<rest>.*)$'
+    )
+    # Structured-data блок RFC5424 в начале MSG: [id k="v" ...][id2 ...]
+    _SYSLOG_SD = re.compile(r'^(?:\[[^\]]*\]\s*)+')
+
     def convert_syslog_to_json(self, data: str) -> list[dict[str, Any]]:
         """
-        Конвертация syslog в JSON.
+        Конвертация syslog в JSON. Поддерживает RFC3164 (BSD) и RFC5424.
+
+        В RFC5424 из <PRI> вычисляются facility/severity, а "-" в полях
+        timestamp/procid/msgid трактуется как NILVALUE → None.
 
         Args:
             data: Логи syslog
@@ -289,13 +349,87 @@ class JSONConverter:
         Returns:
             Список словарей
         """
-        pattern = (
-            r'(?P<timestamp>[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+'
-            r'(?P<host>\S+)\s+'
-            r'(?P<app>\S+?)(?:\[(?P<pid>\d+)\])?:\s+'
-            r'(?P<message>.*)'
-        )
-        return self.convert_text_to_json(data, pattern=pattern)
+        result: list[dict[str, Any]] = []
+        for line in data.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+
+            m = self._SYSLOG_RFC5424.match(line)
+            if m:
+                result.append(self._build_rfc5424(m))
+                continue
+
+            m = self._SYSLOG_ISO.match(line) or self._SYSLOG_BSD.match(line)
+            if m:
+                rec = m.groupdict()
+                if rec.get("pid"):
+                    rec["pid"] = int(rec["pid"])
+                if self.normalize_keys:
+                    rec = {self._normalize_key(k): v for k, v in rec.items()}
+                result.append(rec)
+                continue
+
+            result.append({"message": line})
+
+        return result
+
+    def _build_rfc5424(self, m: "re.Match") -> dict[str, Any]:
+        """Собирает запись из RFC5424-совпадения: PRI→facility/severity, SD→message."""
+        pri = int(m.group("pri"))
+        rec: dict[str, Any] = {
+            "facility": pri >> 3,
+            "severity": pri & 0x7,
+            "version": int(m.group("version")),
+            "timestamp": _nil(m.group("timestamp")),
+            "host": _nil(m.group("host")),
+            "app": _nil(m.group("app")),
+            "pid": _nil(m.group("pid")),
+            "msgid": _nil(m.group("msgid")),
+        }
+        rest = m.group("rest")
+        sd = self._SYSLOG_SD.match(rest)
+        if sd:
+            rec["structured_data"] = sd.group(0).strip()
+            rest = rest[sd.end():].lstrip()
+        elif rest.startswith("- "):
+            rest = rest[2:]
+        elif rest == "-":
+            rest = ""
+        rec["message"] = rest
+        if self.normalize_keys:
+            rec = {self._normalize_key(k): v for k, v in rec.items()}
+        return rec
+
+    def convert_logfmt_to_json(self, data: str) -> list[dict[str, Any]]:
+        """Конвертация logfmt (key=value пары) в список объектов.
+
+        Каждая строка → объект из её пар. Значения снимаются с кавычек и
+        приводятся к типам (coerce_types). Голый ключ без `=` (флаг) → True.
+        """
+        result: list[dict[str, Any]] = []
+        for line in data.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            record: dict[str, Any] = {}
+            for m in _LOGFMT_PAIR.finditer(line):
+                key, raw = m.group(1), m.group(2)
+                if raw and raw[0] in "\"'" and raw[-1] == raw[0] and len(raw) >= 2:
+                    inner = raw[1:-1]
+                    # Снимаем экранирование вручную (\" \\ \n \t \r), НЕ через
+                    # unicode_escape: тот через utf-8→latin-1 ломает кириллицу/эмодзи.
+                    value: Any = _LOGFMT_UNESCAPE.sub(_logfmt_unescape_repl, inner) \
+                        if "\\" in inner else inner
+                elif raw == "":
+                    value = None
+                else:
+                    value = self._coerce_type(raw) if self.coerce_types else raw
+                nk = self._normalize_key(key) if self.normalize_keys else key
+                record[nk] = value
+            if record:
+                result.append(record)
+        return result
 
     def convert_loki_nginx_to_json(self, data: str) -> dict:
         """
@@ -588,7 +722,7 @@ class JSONConverter:
             except ValueError:
                 pass
 
-        if _FLOAT_RE.match(value):
+        if _FLOAT_RE.match(value) and not _FLOAT_LEADING_ZERO.match(value):
             try:
                 f = float(value)
                 # Не-финитные (inf/nan, напр. из переполнения '1e999') не пускаем:

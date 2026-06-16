@@ -9,8 +9,8 @@
   --border:    #2a233f;
   --border-hi: #3a3257;
   --text:      #ece6ff;
-  --muted:     #9088b3;
-  --subtle:    #5d5577;
+  --muted:     #a39bc4;   /* поднят с #9088b3 → ближе к AA на surface */
+  --subtle:    #7d7499;   /* поднят с #5d5577 → проходит AA для мелких подписей */
   --code:      #c5beea;
   --accent:    #c69dff;
   --accent-soft: rgba(198,157,255,0.12);
@@ -21,8 +21,31 @@
   --green: #7dffaf;
   --sans: "Inter Tight", -apple-system, system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* типографическая шкала — единые ступени вместо разнобоя 9…13px */
+  --fs-2xs: 10px;   /* микроподписи: метаданные, ось гистограммы */
+  --fs-xs:  11px;   /* подписи, чипы, моно-метаданные */
+  --fs-sm:  12px;   /* основной мелкий текст, контролы */
+  --fs-md:  13px;   /* база */
+  --fs-lg:  15px;   /* акценты, заголовок записи */
+
+  /* радиусы — единая система скруглений */
+  --r-sm: 5px;
+  --r-md: 7px;
+  --r-lg: 10px;
+
+  /* движение — общий ритм для всех переходов */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --t-fast: 120ms;
+  --t-mid:  180ms;
+
+  /* высота/тени для «приподнятых» поверхностей */
+  --shadow-pop: 0 12px 40px rgba(0,0,0,0.45), 0 0 0 1px var(--border);
 }
 * { box-sizing: border-box; }
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text);
@@ -79,7 +102,7 @@ body {
 /* ── PANES ─────────────────────────────────────────────────── */
 .panes {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 268px 1fr 380px;
+  display: grid; grid-template-columns: 268px minmax(420px, 1fr) 380px;
   overflow: hidden;
 }
 .pane { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -181,8 +204,13 @@ button {
 }
 button:hover { border-color: var(--border-hi); }
 button.primary { background: var(--accent); color: #1a0f2e; border-color: var(--accent); font-weight: 700; width: 100%; }
-button.primary:hover { background: #d6b3ff; }
+button.primary:hover { background: #d6b3ff; box-shadow: 0 4px 16px rgba(198,157,255,0.28); }
+button.primary:active { transform: translateY(1px); }
 button:disabled { opacity: .5; cursor: not-allowed; }
+
+/* единый видимый фокус для клавиатурной навигации (a11y) */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline-offset: 1px; }
 
 /* CENTER — log stream */
 .stream-head, .stream-row {
@@ -201,8 +229,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .stream { flex: 1; overflow-y: auto; padding: 4px 0; }
 .stream-empty { padding: 40px 16px; color: var(--subtle); font-size: 12px; text-align: center; }
 .stream-row {
-  font-family: var(--mono); font-size: 11.5px; cursor: pointer;
+  font-family: var(--mono); font-size: var(--fs-xs); cursor: pointer;
   border-left: 3px solid transparent;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
 .stream-row:hover { background: var(--surface-2); }
 .stream-row.lvl-ERROR { border-left-color: var(--error); background: rgba(255,122,150,0.06); }
@@ -273,16 +302,19 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
 .insp-hidden { margin-left: auto; font-size: 9.5px; font-family: var(--mono); color: var(--warn); background: rgba(255,195,92,0.12); border-radius: 3px; padding: 2px 6px; }
 .req-chip { font-family: var(--mono); font-size: 9.5px; color: var(--accent); background: var(--accent-soft); border: 1px solid var(--border-hi); border-radius: 999px; padding: 2px 8px; cursor: pointer; white-space: nowrap; }
 .req-chip:hover { background: rgba(198,157,255,0.22); }
-.insp-title { font-family: var(--mono); font-size: 12px; color: var(--text); line-height: 1.45; word-break: break-word; }
+.insp-title { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); line-height: 1.5; word-break: break-word; }
 
 .insp-tabs { display: flex; padding: 8px 14px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .insp-tabs .tab {
-  font-size: 11.5px; padding: 6px 10px; color: var(--muted); cursor: pointer;
+  font-size: var(--fs-sm); padding: 6px 10px; color: var(--muted); cursor: pointer;
   border-bottom: 2px solid transparent; font-weight: 500;
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
 }
+.insp-tabs .tab:hover { color: var(--text); }
 .insp-tabs .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
-.insp-body { flex: 1; overflow-y: auto; padding: 10px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; }
+.insp-body { flex: 1; overflow-y: auto; padding: 10px 14px; font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.6; animation: insp-fade var(--t-mid) var(--ease); }
+@keyframes insp-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .json-line { white-space: pre-wrap; word-break: break-word; }
 .j-key { color: var(--accent); }
 .j-str { color: var(--green); }
@@ -322,6 +354,74 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
 }
 .dumplog { color: var(--muted); text-decoration: none; border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; }
 .dumplog:hover { color: var(--accent); border-color: var(--border-hi); }
+
+/* ── SQL-блок инспектора ───────────────────────────────────── */
+/* Выделенный, отформатированный (ядром через sqlparse) запрос с подсветкой
+   ключевых слов — здесь форматирование наконец видно пользователю. */
+.sql-block {
+  margin: 0 0 12px; border: 1px solid var(--border);
+  border-radius: var(--r-md); background: var(--surface-2); overflow: hidden;
+}
+.sql-block-label {
+  font-size: var(--fs-2xs); letter-spacing: 1px; font-weight: 700;
+  text-transform: uppercase; color: var(--accent);
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+}
+.sql-code {
+  margin: 0; padding: 10px 12px; font-family: var(--mono); font-size: var(--fs-xs);
+  line-height: 1.55; color: var(--code); white-space: pre-wrap; word-break: break-word;
+  overflow-x: auto;
+}
+.sql-code .sql-kw { color: var(--accent); font-weight: 700; }
+
+/* ── пустые состояния (поток / инспектор) ──────────────────── */
+.stream-empty, .insp-empty {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.empty-mascot { opacity: 0.5; }
+.empty-title { color: var(--muted); font-size: var(--fs-sm); }
+.empty-hint  { color: var(--subtle); font-size: var(--fs-xs); font-family: var(--mono); }
+
+/* ── адаптив ───────────────────────────────────────────────── */
+/* < 1100px — master-detail сворачивается: инспектор уходит в выезжающий справа
+   drawer поверх потока (паттерн Apple), а поток получает всю ширину. */
+.panes { position: relative; }
+.insp-close { display: none; }
+.insp-backdrop { display: none; }
+
+@media (max-width: 1100px) {
+  .panes { grid-template-columns: 248px minmax(0, 1fr); }
+  .pane-right {
+    position: absolute; top: 0; right: 0; bottom: 0; z-index: 30;
+    width: min(400px, 88vw);
+    transform: translateX(100%);
+    transition: transform var(--t-mid) var(--ease);
+    box-shadow: var(--shadow-pop);
+  }
+  body.inspect .pane-right { transform: translateX(0); }
+  .insp-backdrop {
+    display: block; position: absolute; inset: 0; z-index: 20;
+    background: rgba(8,5,14,0.5); opacity: 0; pointer-events: none;
+    transition: opacity var(--t-mid) var(--ease);
+  }
+  body.inspect .insp-backdrop { opacity: 1; pointer-events: auto; }
+  .insp-close {
+    display: flex; align-items: center; justify-content: center;
+    position: absolute; top: 10px; right: 10px; z-index: 2;
+    width: 26px; height: 26px; padding: 0; border-radius: 50%;
+    background: var(--surface-2); color: var(--muted); font-size: var(--fs-sm);
+  }
+  .insp-close:hover { color: var(--text); border-color: var(--border-hi); }
+}
+
+/* < 760px — узкие экраны: ужимаем левую колонку и прячем подсказку ⌘K. */
+@media (max-width: 760px) {
+  .panes { grid-template-columns: 216px minmax(0, 1fr); }
+  .breadcrumb { display: none; }
+  .kbd { display: none; }
+  .searchbar { max-width: none; }
+}
 
 /* scrollbars */
 ::-webkit-scrollbar { width: 9px; height: 9px; }
