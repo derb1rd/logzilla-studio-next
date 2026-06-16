@@ -22,6 +22,10 @@ const state = {
   selected: -1,        // индекс выбранной записи в state.view (-1 если скрыта/нет)
   selectedRec: null,   // сама выбранная запись (источник истины для инспектора:
                        // может быть выбрана из контекста и скрыта фильтром в потоке)
+  contextAnchor: null, // «якорь» вкладки Контекст: запись, ОТ которой строится трасса
+                       // (req_id или окно ±6). Меняется только при выборе из потока
+                       // (selectRow/стрелки); клики ВНУТРИ контекста его не двигают —
+                       // иначе список пересчитывался на каждый клик и «скакал».
   queryTerms: [],      // текстовые термины поиска (для подсветки в строках)
   activeTab: "struct",
   totalLines: 0,
@@ -30,6 +34,11 @@ const state = {
 let _seq = 0;
 const newId = () => "f" + (++_seq);
 const activeEntry = () => state.session.files.find((f) => f.id === state.session.activeId) || null;
+
+// Файл-источник записи (по идентичности). Якорь контекста может жить в другом
+// файле, чем активный (cross-file трасса), — окно ±6 строим вокруг него там.
+const anchorFile = (rec) =>
+  rec ? state.session.files.find((f) => f.status === "parsed" && f.records.indexOf(rec) !== -1) || null : null;
 
 const $ = (id) => document.getElementById(id);
 // LEVEL_RE и прочий чистый слой берём из core.js (см. деструктуризацию из LZ ниже).
@@ -141,7 +150,7 @@ function readEntryFile(entry) {
 function setActive(id) {
   if (state.session.activeId === id) return;
   state.session.activeId = id;
-  state.selectedRec = null; state.selected = -1;
+  state.selectedRec = null; state.selected = -1; state.contextAnchor = null;
   obs.action("file_switch", { id });
   renderTree();
   renderActive();
@@ -154,7 +163,7 @@ function removeEntry(id) {
   if (state.session.activeId === id) {
     const next = state.session.files[i] || state.session.files[i - 1] || null;
     state.session.activeId = next ? next.id : null;
-    state.selectedRec = null; state.selected = -1;
+    state.selectedRec = null; state.selected = -1; state.contextAnchor = null;
   }
   obs.action("file_remove", { id });
   renderTree();
@@ -244,7 +253,7 @@ async function doParse() {
   $("parseBtn").disabled = true;
   setFooter(`Парсинг… (${files.length} файл(ов))`);
   // Записи устаревают: их объекты пересоздаются прогоном.
-  state.selectedRec = null; state.selected = -1;
+  state.selectedRec = null; state.selected = -1; state.contextAnchor = null;
   try {
     await runPool(files, 3, parseEntry);
   } finally {
@@ -486,6 +495,8 @@ function scrollToSelected() {
 function selectRow(i) {
   state.selected = i;
   state.selectedRec = state.view[i] || null;
+  // Выбор из потока — «свежая» точка навигации: пере-якорим контекст на неё.
+  state.contextAnchor = state.selectedRec;
   obs.action("inspect_row", { idx: i });
   paintSelection();
   renderInspector();
@@ -668,8 +679,12 @@ function valHtml(key, v) {
 // полных окон state.session.files (не из отфильтрованного view), чтобы фильтр
 // уровней не рвал трассу запроса.
 function contextHtml() {
-  const sel = state.selectedRec;
-  const rid = reqIdOf(sel);
+  // Контекст строится от ЯКОРЯ, а не от текущего выбора: клик по строке внутри
+  // контекста меняет selectedRec, но НЕ якорь — поэтому список (и его счётчик)
+  // стабильны, двигается только подсветка «center». Якорь меняется лишь при
+  // выборе из потока (selectRow). Фолбэк на selectedRec — для первого открытия.
+  const anchor = state.contextAnchor || state.selectedRec;
+  const rid = reqIdOf(anchor);
   const active = activeEntry();
   let label, rows;          // rows: [{ fileId, name, i, rec }]
   if (rid) {
@@ -680,17 +695,22 @@ function contextHtml() {
     const nFiles = new Set(rows.map((r) => r.fileId)).size;
     label = `req_id = ${escapeHtml(rid)} · ${ru(rows.length)} строк` + (nFiles > 1 ? ` · ${nFiles} файла` : "");
   } else {
-    const recs = active ? active.records : [];
-    const o = recs.indexOf(sel);
+    // Окно ±6 центрируем на ЯКОРЕ (а не на текущем выборе) — иначе при клике по
+    // соседу окно переезжало и строки «скакали».
+    const af = anchorFile(anchor) || active;
+    const recs = af ? af.records : [];
+    const o = recs.indexOf(anchor);
     const lo = Math.max(0, o - 6), hi = Math.min(recs.length, o + 7);
     rows = [];
-    for (let i = lo; i < hi; i++) rows.push({ fileId: active.id, name: active.name, i, rec: recs[i] });
+    for (let i = lo; i < hi; i++) rows.push({ fileId: af.id, name: af.name, i, rec: recs[i] });
     label = "нет req_id · соседние строки активного файла (±6)";
   }
   const multi = new Set(rows.map((r) => r.fileId)).size > 1;
   let html = `<div class="histo-label">${label}</div>`;
   for (const { fileId, name, i, rec } of rows) {
-    const center = rec === sel ? " center" : "";
+    // Подсвечиваем строку, которую сейчас инспектируем (selectedRec), — она ходит
+    // внутри СТАБИЛЬНОГО по якорю списка.
+    const center = rec === state.selectedRec ? " center" : "";
     const fileBadge = multi ? `<span class="ctx-file" title="${escapeHtml(name)}">${escapeHtml(shortName(name))}</span>` : "";
     html += `<div class="ctx-row${multi ? " xfile" : ""}${center}" data-fid="${fileId}" data-ri="${i}">` +
       `<span class="c-n">${i + 1}</span>` +
