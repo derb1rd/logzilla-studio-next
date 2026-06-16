@@ -566,3 +566,61 @@ def _maybe_structure(value: Any) -> Any:
     if isinstance(parsed, (dict, list)):
         return _decode_unicode_escapes(parsed)
     return value
+
+
+# --- Свёртка инфраструктурных/служебных полей в _meta ----------------------
+# Запись лога сервиса важна, а оркестрация/транспорт (k8s, docker, под, неймспейс)
+# и дубль event.original — шум для прикладного анализа. Не удаляем (ничего не
+# теряем), а группируем под один вложенный ключ _meta — наверху остаётся лог
+# сервиса. Активируется только когда такие поля реально есть → для обычных логов
+# это no-op. Ключи подобраны консервативно (по именам, однозначно инфраструктурным):
+# id/type/index/score НЕ трогаем — это частые прикладные имена.
+_INFRA_PREFIXES: tuple[str, ...] = ("kubernetes", "container_", "docker", "pod_")
+_INFRA_EXACT: frozenset[str] = frozenset({
+    "event_original", "namespace_name", "namespace", "service_instance",
+})
+
+
+def _is_infra_key(key: str) -> bool:
+    kl = key.lower()
+    return kl in _INFRA_EXACT or kl.startswith(_INFRA_PREFIXES)
+
+
+# Конверт результата OpenSearch/Elastic: id/type/index/score (+sort/highlight)
+# вокруг документа. Сами по себе id/type — частые прикладные имена, поэтому
+# демотим их ТОЛЬКО когда присутствует вся характерная четвёрка — это однозначно
+# обёртка экспорта, а не прикладные поля.
+_OPENSEARCH_ENVELOPE: frozenset[str] = frozenset({"id", "type", "index", "score"})
+_OPENSEARCH_EXTRA: frozenset[str] = frozenset({"sort", "highlight"})
+
+
+def _envelope_keys(rec: dict) -> frozenset[str]:
+    keys_lower = {k.lower() for k in rec}
+    if _OPENSEARCH_ENVELOPE.issubset(keys_lower):
+        return _OPENSEARCH_ENVELOPE | _OPENSEARCH_EXTRA
+    return frozenset()
+
+
+def group_infra_fields(data: Any, enabled: bool = True) -> Any:
+    """Сворачивает инфраструктурные поля записи в вложенный _meta.
+
+    Применяется только к спискам записей лога (list[dict]) — не к произвольным
+    JSON-объектам. Порядок прикладных полей сохраняется; _meta добавляется в конец.
+    """
+    if not enabled or not isinstance(data, list):
+        return data
+    result = []
+    for rec in data:
+        if not isinstance(rec, dict):
+            result.append(rec)
+            continue
+        envelope = _envelope_keys(rec)
+        app: dict[str, Any] = {}
+        meta: dict[str, Any] = {}
+        for key, value in rec.items():
+            is_meta = _is_infra_key(key) or key.lower() in envelope
+            (meta if is_meta else app)[key] = value
+        if meta:
+            app["_meta"] = meta
+        result.append(app)
+    return result

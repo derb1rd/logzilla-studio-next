@@ -248,6 +248,43 @@ class TestDeepExpand(unittest.TestCase):
         self.assertEqual(out.get("rows"), 5)
 
 
+class TestGroupInfra(unittest.TestCase):
+    """Инфраструктурные поля сворачиваются в _meta, лог сервиса — наверху."""
+
+    def setUp(self):
+        from logZilla3000.message_expander import group_infra_fields
+        self.group = group_infra_fields
+
+    def test_infra_moved_to_meta(self):
+        rec = {
+            "timestamp": "t", "level": "ERROR", "msg": "boom", "caller": "api/main.go:1",
+            "kubernetes_pod_name": "p", "kubernetes_labels_app_name": "a",
+            "container_image": "img", "docker_id": "d", "namespace": "ns",
+            "event_original": {"x": 1},
+        }
+        out = self.group([rec])[0]
+        # Прикладные поля — наверху
+        for k in ("timestamp", "level", "msg", "caller"):
+            self.assertIn(k, out)
+        # Инфраструктура — в _meta, не наверху
+        for k in ("kubernetes_pod_name", "kubernetes_labels_app_name",
+                  "container_image", "docker_id", "namespace", "event_original"):
+            self.assertNotIn(k, out)
+            self.assertIn(k, out["_meta"])
+
+    def test_app_id_type_not_demoted(self):
+        """id/type/index/score — частые прикладные имена, их НЕ трогаем."""
+        rec = {"level": "INFO", "id": "req-1", "type": "order", "msg": "ok"}
+        out = self.group([rec])[0]
+        self.assertEqual(out["id"], "req-1")
+        self.assertEqual(out["type"], "order")
+        self.assertNotIn("_meta", out)  # инфра-полей нет → no-op
+
+    def test_no_infra_is_noop(self):
+        rec = {"timestamp": "t", "level": "INFO", "msg": "hi"}
+        self.assertEqual(self.group([rec])[0], rec)
+
+
 class TestPerformance(unittest.TestCase):
     def test_long_line_no_backtracking(self):
         """Длинная строка без '=' не должна вызывать катастрофический бэктрекинг."""

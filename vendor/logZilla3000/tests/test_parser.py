@@ -761,11 +761,13 @@ class TestCsvWithJsonColumn(unittest.TestCase):
         self.assertIsInstance(rec["status"], int)
         self.assertAlmostEqual(rec["request_time"], 0.0014)
         self.assertEqual(rec["url"], "/api/x")
-        # вложенный объект уплощён через '_'
-        self.assertEqual(rec["kubernetes_pod_name"], "back-1")
-        self.assertEqual(rec["kubernetes_namespace_name"], "ns")
-        # колонка вне JSON сохранена
-        self.assertEqual(rec["kubernetes_container_name"], "back")
+        # вложенный объект уплощён через '_' и свёрнут в _meta (инфраструктура):
+        # наверху остаётся лог сервиса, k8s-поля не засоряют запись.
+        self.assertEqual(rec["_meta"]["kubernetes_pod_name"], "back-1")
+        self.assertEqual(rec["_meta"]["kubernetes_namespace_name"], "ns")
+        # колонка вне JSON тоже инфраструктурная → в _meta
+        self.assertEqual(rec["_meta"]["kubernetes_container_name"], "back")
+        self.assertNotIn("kubernetes_pod_name", rec)
         # никаких reg-экспных мусорных полей
         self.assertNotIn("json_snippet", rec)
         self.assertNotIn("http_status", rec)
