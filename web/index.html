@@ -75,6 +75,7 @@
       <div class="field">
         <label for="encoding">Кодировка</label>
         <select id="encoding">
+          <option value="auto">авто</option>
           <option>utf-8</option><option>utf-8-sig</option>
           <option>cp1251</option><option>koi8-r</option><option>latin-1</option>
         </select>
@@ -133,7 +134,7 @@
           <option value="active">активный файл</option>
           <option value="all">все файлы (по отдельности)</option>
         </select>
-        <label class="check"><input type="checkbox" id="ndjson"> NDJSON (по записи на строку)</label>
+        <label class="check" title="NDJSON — по одному JSON-объекту на строку"><input type="checkbox" id="ndjson"> NDJSON</label>
         <label class="check"><input type="checkbox" id="gzip"> gzip</label>
         <button id="exportBtn" class="primary">Экспортировать JSON</button>
       </div>

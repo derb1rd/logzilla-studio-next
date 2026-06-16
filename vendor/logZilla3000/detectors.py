@@ -11,7 +11,7 @@ import io
 from enum import Enum
 from typing import Optional
 
-from .cleaners import reframe_tabular
+from .cleaners import reframe_tabular, _is_header_like
 
 
 class LogFormat(Enum):
@@ -171,6 +171,15 @@ class FormatDetector:
         )
         if csv_format:
             return csv_format
+        # Обёрнутый/подпорченный экспорт: строгая проверка консистентности не прошла
+        # (рваные внутренние строки — напр. незакавыченная запятая в timestamp), НО
+        # рамка что-то размотала/срезала и первая строка — явная шапка. Тогда всё
+        # равно CSV: конвертер разложит рваные строки по col_N, а вложенный JSON
+        # развернётся. Гейт (reframed != stripped + шапка) не даёт ложных CSV из текста.
+        if reframed != stripped:
+            head = reframed.lstrip().split("\n", 1)[0]
+            if _is_header_like(head):
+                return LogFormat.CSV
 
         # 2.5. Проверяем Loki-prefixed nginx логи
         loki_nginx = self._detect_loki_nginx(sample)

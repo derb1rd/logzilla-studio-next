@@ -339,7 +339,7 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
 .histo-axis { display: flex; justify-content: space-between; font-size: 9.5px; color: var(--subtle); margin-top: 4px; }
 
 .export {
-  display: flex; align-items: center; gap: 12px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; row-gap: 8px;
   padding: 10px 14px; border-top: 1px solid var(--border); flex-shrink: 0; background: var(--surface);
 }
 .export .check { margin: 0; }

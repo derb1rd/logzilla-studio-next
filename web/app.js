@@ -84,7 +84,9 @@ function collectOptions() {
   const levels = [...document.querySelectorAll(".lvl:checked")].map((c) => c.value);
   const allLevels = document.querySelectorAll(".lvl").length;
   return {
-    encoding: $("encoding").value,
+    // Источник всегда inline (текст уже раскодирован в браузере), поэтому серверу
+    // кодировка не нужна; «авто» отдаём как utf-8, чтобы не упереться в enum контракта.
+    encoding: $("encoding").value === "auto" ? "utf-8" : $("encoding").value,
     log_levels: levels.length === allLevels ? [] : levels,
     remove_duplicates: $("remove_duplicates").checked,
     remove_ansi: $("remove_ansi").checked,
@@ -130,16 +132,36 @@ function loadFiles(fileList) {
 }
 
 // Чтение файла с текущей кодировкой. Перечитываем при смене кодировки.
+// Авто-определение кодировки: валидный UTF-8 (fatal) → UTF-8; иначе windows-1251
+// (самая частая для ru-экспортов: cp1251-файл, прочитанный как utf-8, давал
+// кракозябры «### ####» и мусорный парс). ASCII-файлы валидны как utf-8 → не
+// трогаются.
+function decodeAuto(buf) {
+  const bytes = new Uint8Array(buf);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    try { return new TextDecoder("windows-1251").decode(bytes); }
+    catch { return new TextDecoder("utf-8").decode(bytes); }
+  }
+}
+
 function readEntryFile(entry) {
   if (!entry.file) return;
   const enc = $("encoding").value;
   const reader = new FileReader();
-  reader.onload = () => {
-    entry.text = reader.result;
+  const finish = (text) => {
+    entry.text = text;
     if (entry.status === "parsed") entry.status = "stale";  // кодировка сменилась → нужен ре-парс
     renderTree();
   };
-  reader.readAsText(entry.file, browserEncoding(enc));
+  if (enc === "auto") {
+    reader.onload = () => finish(decodeAuto(reader.result));
+    reader.readAsArrayBuffer(entry.file);
+  } else {
+    reader.onload = () => finish(reader.result);
+    reader.readAsText(entry.file, browserEncoding(enc));
+  }
 }
 
 function setActive(id) {
