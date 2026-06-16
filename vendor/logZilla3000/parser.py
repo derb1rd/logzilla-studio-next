@@ -15,7 +15,7 @@ from .detectors import FormatDetector, LogFormat
 from .converters import JSONConverter
 from .sql_formatter import format_sql_fields, unescape_sql_in_json
 from .message_expander import expand_message_fields
-from .text_parser import parse_generic_line
+from .text_parser import parse_generic_line, is_export_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -446,6 +446,9 @@ class UniversalLogParser:
         for line in lines:
             line = line.strip()
             if not line:
+                continue
+            # Преамбула экспорта Loki/Grafana — не лог-запись, в предпросмотр не берём.
+            if is_export_metadata(line):
                 continue
             rec = parse_generic_line(line)
             results.append(rec if rec is not None else {"message": line})

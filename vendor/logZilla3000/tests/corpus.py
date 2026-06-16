@@ -285,6 +285,22 @@ CASES: list[dict] = [
         "checks": {"level": "INFO"},
     },
 
+    {
+        # Экспорт Grafana/Loki Explore: преамбула + "<ts>\t{json}" на строку.
+        # Поля JSON поднимаются на верх (level/service становятся колонками),
+        # строки-метаданные экспорта отсеиваются.
+        "name": "loki-explore-json-export",
+        "raw": 'Common labels: {"app":"event-mapper"}\n'
+               'Line limit: "1000 (77 returned)"\n'
+               'Total bytes processed: "80.4 kB"\n'
+               '2026-06-09 17:00:19.624\t{"level": "ERROR", "msg": "boom", "service_name": "event-mapper", "trace_id": "abc"}\n'
+               '2026-06-09 17:00:19.617\t{"level": "INFO", "msg": "ok", "service_name": "event-mapper"}',
+        "fmt": "text",
+        "checks": {"level": "ERROR", "msg": "boom", "service_name": "event-mapper", "trace_id": "abc"},
+        "absent": ["message"],
+        "count": 2,
+    },
+
     # ============================ анти-кейсы ============================
     # Проза со случайными запятыми НЕ должна стать CSV.
     {

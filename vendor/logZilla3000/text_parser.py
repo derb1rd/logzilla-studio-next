@@ -17,8 +17,11 @@
 Никакого «угадывания» лишних полей — только то, что реально стоит в начале строки.
 """
 
+import json
 import re
 from typing import Any, Optional
+
+from .message_expander import _decode_unicode_escapes, _expand_nested_strings
 
 # --- Уровни логирования: распознавание и канонизация ----------------------
 # Канонизируем синонимы к одному виду, чтобы фильтрация по уровню и группировка
@@ -101,6 +104,42 @@ def canon_level(token: str) -> str:
     return _LEVEL_CANON.get(token.upper(), token.upper())
 
 
+# Преамбула экспорта Grafana/Loki Explore — не записи лога, а метаданные выгрузки.
+# Те же строки распознаёт loki_nginx-конвертер; в текстовом пути их надо отсеять,
+# иначе они засоряют предпросмотр как фейковые записи {"message": "..."}.
+_LOKI_EXPORT_META = re.compile(
+    r"^(?:Common labels:|Line limit:|Total bytes processed:)\s"
+)
+
+
+def is_export_metadata(line: str) -> bool:
+    """True для строк-метаданных экспорта Loki/Grafana (не лог-записи)."""
+    return bool(_LOKI_EXPORT_META.match(line.strip()))
+
+
+def _norm_json_key(key: str) -> str:
+    """Нормализация ключа поднятого JSON-поля (lower + snake), как в конвертере."""
+    key = re.sub(r"[^\w]+", "_", key.strip().lower())
+    return re.sub(r"_+", "_", key).strip("_")
+
+
+def _json_object_payload(text: str) -> Optional[dict]:
+    """Если text — целиком JSON-объект, возвращает его dict, иначе None.
+
+    Частый случай: экспорт Loki/Grafana и структурные логи имеют форму
+    "<timestamp>\\t{json}" / "<timestamp> {json}". Тогда поля payload (level,
+    service_name, trace_id, ...) — это и есть поля записи, а не текст message.
+    """
+    s = text.strip()
+    if not (s.startswith("{") and s.endswith("}")):
+        return None
+    try:
+        obj = json.loads(s)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
 def _parse_klog(line: str) -> Optional[dict[str, Any]]:
     m = _KLOG_RE.match(line)
     if not m:
@@ -141,6 +180,18 @@ def parse_generic_line(line: str) -> Optional[dict[str, Any]]:
             rec["timestamp"] = m.group("ts").strip()
             rest = rest[m.end():].lstrip(" \t")
             break
+
+    # 1b. Остаток — целиком JSON-объект ("<ts>\t{json}", экспорт Loki/Grafana/ECS):
+    #     поднимаем поля payload на верх записи, чтобы level/service_name/trace_id
+    #     стали колонками (а не прятались в строковом message → ломая фильтр уровня
+    #     в предпросмотре). Требуем таймстамп — иначе bare-{json} ловит JSON-детектор.
+    if "timestamp" in rec:
+        payload = _json_object_payload(rest)
+        if payload is not None:
+            payload = _decode_unicode_escapes(_expand_nested_strings(payload))
+            for key, value in payload.items():
+                rec[_norm_json_key(key)] = value
+            return rec
 
     # 2. Уровень логирования.
     m = _LEVEL_RE.match(rest)
