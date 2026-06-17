@@ -642,7 +642,7 @@ _K8S_META_EXACT: frozenset[str] = frozenset({
     # Эти поля оседают в _meta без prefix'а (при некоторых путях expand):
     "host",                 # k8s node hostname
     "pod_name", "pod_id", "pod_ip",
-    "namespace_name",
+    "namespace", "namespace_name",
     "container_name", "container_hash", "container_image",
     "docker_id",
 })
