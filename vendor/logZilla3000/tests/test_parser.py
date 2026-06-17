@@ -773,6 +773,25 @@ class TestCsvWithJsonColumn(unittest.TestCase):
         self.assertNotIn("http_status", rec)
         self.assertEqual(result[1]["status"], 500)
 
+    def test_unquoted_comma_in_leading_column_repaired(self):
+        # Регрессия: over-quoted Kibana/OpenSearch-экспорт. После снятия внешней
+        # обёртки колонка @timestamp («Jun 11, 2026 @ 12:02:14.345») НЕзакавычена и
+        # содержит запятую → csv.reader дробил её, хвост «2026 @ ...» утекал в
+        # event.original, а payload-JSON сваливался в col_2. Должно: излишек
+        # сливается обратно в первую колонку, JSON-колонка разворачивается чисто.
+        conv = JSONConverter()
+        rows = conv.convert_csv_to_json(
+            '@timestamp,event.original\n'
+            'Jun 11, 2026 @ 12:02:14.345,'
+            '"{""level"":""ERROR"",""status"":500}"',
+            delimiter=",",
+        )
+        self.assertEqual(len(rows), 1)
+        rec = rows[0]
+        self.assertEqual(rec["timestamp"], "Jun 11, 2026 @ 12:02:14.345")
+        self.assertEqual(rec["event_original"], '{"level":"ERROR","status":500}')
+        self.assertNotIn("col_2", rec)
+
     def test_tabular_clean_preserves_cell_content(self):
         # двойные пробелы внутри значений не схлопываются
         cleaned = LogCleaner().clean_tabular("a;b\nx;foo   bar")

@@ -146,6 +146,15 @@ class JSONConverter:
 
         result = []
         for row in data_rows:
+            # Починка рваной строки: поле БОЛЬШЕ заголовка, а ПОСЛЕДНЕЕ поле — это
+            # JSON-объект (payload-колонка экспорта). Тогда лишние поля появились
+            # из-за НЕзакавыченного разделителя в одной из ведущих колонок (типичный
+            # @timestamp Kibana «Jun 11, 2026 @ 12:02:14.345» с запятой) — собираем
+            # излишек обратно в первую колонку, чтобы не терять/не дробить таймстамп.
+            if len(fieldnames) >= 1 and len(row) > len(fieldnames) \
+                    and self._as_json_object(row[-1]) is not None:
+                surplus = len(row) - len(fieldnames)
+                row = [delimiter.join(row[: surplus + 1])] + row[surplus + 1:]
             record = {}
             # Идём по максимуму из (заголовок, строка): если в строке полей БОЛЬШЕ,
             # чем колонок в заголовке (рваный CSV), лишние не теряем — кладём под
