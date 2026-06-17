@@ -196,7 +196,9 @@
     // оставался однострочным. _meta (свёрнутая инфраструктура) в строку не тянем —
     // это служебный блок, не содержимое лога.
     return Object.entries(rec)
-      .filter(([k]) => k !== "_meta" && !CONSUMED_KEYS.has(k.toLowerCase()))
+      // _meta и синтетические col_N (переполнение рваной строки битого CSV) в
+      // строку сообщения не тянем — иначе стены `col_2=…col_21=…` засоряют поток.
+      .filter(([k]) => k !== "_meta" && !/^col_\d+$/.test(k) && !CONSUMED_KEYS.has(k.toLowerCase()))
       .map(([k, v]) => `${k}=${flatVal(v)}`)
       .join(" · ");
   }
