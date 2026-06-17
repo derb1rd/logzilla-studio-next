@@ -146,15 +146,7 @@ class JSONConverter:
 
         result = []
         for row in data_rows:
-            # Починка рваной строки: поле БОЛЬШЕ заголовка, а ПОСЛЕДНЕЕ поле — это
-            # JSON-объект (payload-колонка экспорта). Тогда лишние поля появились
-            # из-за НЕзакавыченного разделителя в одной из ведущих колонок (типичный
-            # @timestamp Kibana «Jun 11, 2026 @ 12:02:14.345» с запятой) — собираем
-            # излишек обратно в первую колонку, чтобы не терять/не дробить таймстамп.
-            if len(fieldnames) >= 1 and len(row) > len(fieldnames) \
-                    and self._as_json_object(row[-1]) is not None:
-                surplus = len(row) - len(fieldnames)
-                row = [delimiter.join(row[: surplus + 1])] + row[surplus + 1:]
+            row = self._repair_json_payload_row(row, fieldnames, delimiter)
             record = {}
             # Идём по максимуму из (заголовок, строка): если в строке полей БОЛЬШЕ,
             # чем колонок в заголовке (рваный CSV), лишние не теряем — кладём под
@@ -169,6 +161,49 @@ class JSONConverter:
             result.append(record)
 
         return result
+
+    def _repair_json_payload_row(
+        self, row: list[str], fieldnames: list[str], delimiter: str
+    ) -> list[str]:
+        """Чинит рваную строку CSV-экспорта вида «<префикс…>,<JSON-payload>».
+
+        Табличные экспорты логов кладут весь payload последней колонкой JSON-строкой.
+        Две беды бьют по разбору:
+        1. Ведущая колонка содержит НЕзакавыченный разделитель (Kibana @timestamp
+           «Jun 11, 2026 @ 12:02:14.345» с запятой) → csv.reader дробит её.
+        2. Кривое экранирование внутри payload (битый sql и т.п.) рвёт сам JSON на
+           несколько полей.
+        В обоих случаях полей получается БОЛЬШЕ заголовка, а наивный разбор
+        рассыпает запись на col_2…col_N. Здесь: находим, где начинается JSON
+        (первое поле с '{'), склеиваем ВСЁ от него в одну payload-колонку, а лишние
+        ведущие поля сливаем в первую колонку. Если payload-JSON валиден — он потом
+        развернётся; если кривой (битый источник) — останется одной строкой, без
+        мусорных col_N. Для нормальных строк (полей ≤ колонок) — no-op.
+        """
+        if len(fieldnames) < 1 or len(row) <= len(fieldnames):
+            return row
+        # JSON-payload — последняя колонка; ищем поле, с которого начинается '{',
+        # но не раньше предпоследней колонки (иначе это не payload-хвост).
+        jstart = next(
+            (i for i, c in enumerate(row)
+             if isinstance(c, str) and c.lstrip().startswith("{")),
+            None,
+        )
+        if jstart is None or jstart < len(fieldnames) - 1:
+            # Нет JSON-хвоста: возможно, рвануло только из-за запятой в ведущей
+            # колонке, а последнее поле — целый JSON-объект. Тогда сливаем излишек
+            # в первую колонку (см. случай 1 без расщепления payload).
+            if self._as_json_object(row[-1]) is not None:
+                surplus = len(row) - len(fieldnames)
+                return [delimiter.join(row[: surplus + 1])] + row[surplus + 1:]
+            return row
+        payload = delimiter.join(row[jstart:])
+        prefix = row[:jstart]
+        npre = len(fieldnames) - 1  # колонок до payload-колонки
+        if npre >= 1 and len(prefix) > npre:
+            merge = len(prefix) - npre + 1
+            prefix = [delimiter.join(prefix[:merge])] + prefix[merge:]
+        return prefix + [payload]
 
     def convert_jsonl_to_json(self, data: str) -> list[dict[str, Any]]:
         """

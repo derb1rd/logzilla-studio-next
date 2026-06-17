@@ -792,6 +792,38 @@ class TestCsvWithJsonColumn(unittest.TestCase):
         self.assertEqual(rec["event_original"], '{"level":"ERROR","status":500}')
         self.assertNotIn("col_2", rec)
 
+    def test_overquoted_odd_quote_row_unwrapped(self):
+        # Регрессия: в over-quoted экспорте строка с НЕпарным прогоном кавычек
+        # (кривой sql → :""""";") срывала СТРОГИЙ _OVERQUOTE_RE → строка оставалась
+        # завёрнутой и рвалась на col_N. Гейт строгий, снятие — толерантное.
+        from logZilla3000.cleaners import reframe_tabular
+        text = (
+            '"@timestamp,""event.original""";\n'
+            '"Jun 11, 2026 @ 12:02:14.344,""{""""sql"""":""""begin""""}""";\n'
+            '"Jun 11, 2026 @ 12:02:14.345,""{""""sql"""":""""select""""}""";\n'
+            '"Jun 11, 2026 @ 12:02:14.346,""{""""sql"""":""""";"",""""x"""":1}""";'
+        )
+        out = reframe_tabular(text)
+        # и нормальная, и кривая (с непарным прогоном) строки потеряли внешний слой
+        self.assertIn('Jun 11, 2026 @ 12:02:14.344,"{', out)
+        self.assertIn('Jun 11, 2026 @ 12:02:14.346,"{', out)
+
+    def test_corrupt_payload_row_no_col_n_explosion(self):
+        # Битый источник: внутри payload кривое экранирование рвёт JSON на куски.
+        # Должно: timestamp восстановлен, payload — одной строкой, без col_2…col_N.
+        conv = JSONConverter()
+        rows = conv.convert_csv_to_json(
+            '@timestamp,event.original\n'
+            # payload намеренно «рваный»: первый кусок начинается с '{', хвосты
+            # приходят отдельными полями из-за битых кавычек
+            'Jun 11, 2026 @ 12:02:14.346,'
+            '"{""sql"":"""," broken "",""x"":1}"',
+            delimiter=",",
+        )
+        rec = rows[0]
+        self.assertEqual(rec["timestamp"], "Jun 11, 2026 @ 12:02:14.346")
+        self.assertFalse([k for k in rec if k.startswith("col_")])
+
     def test_tabular_clean_preserves_cell_content(self):
         # двойные пробелы внутри значений не схлопываются
         cleaned = LogCleaner().clean_tabular("a;b\nx;foo   bar")
