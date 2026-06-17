@@ -174,6 +174,17 @@ function setActive(id) {
   renderActive();
 }
 
+function clearSession() {
+  if (state.session.files.length === 0) return;
+  state.session.files = [];
+  state.session.activeId = null;
+  state.selectedRec = null; state.selected = -1; state.contextAnchor = null;
+  obs.action("session_clear", {});
+  renderTree();
+  renderActive();
+  setFooter("Сессия очищена.");
+}
+
 function removeEntry(id) {
   const i = state.session.files.findIndex((f) => f.id === id);
   if (i < 0) return;
@@ -891,6 +902,7 @@ function wireUp() {
   });
 
   $("parseBtn").addEventListener("click", doParse);
+  $("clearBtn").addEventListener("click", clearSession);
   $("exportBtn").addEventListener("click", doExport);
   $("inspClose").addEventListener("click", closeInspector);
   $("inspBackdrop").addEventListener("click", closeInspector);

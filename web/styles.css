@@ -197,7 +197,8 @@ select {
 .check { display: flex; align-items: center; gap: 8px; font-size: 12px; margin: 6px 0; cursor: pointer; color: var(--text); }
 .check input { accent-color: var(--accent); }
 
-.left-actions { margin-top: auto; padding-top: 12px; }
+.left-actions { margin-top: auto; padding-top: 12px; display: flex; gap: 6px; }
+.left-actions button.primary { flex: 1; }
 button {
   background: var(--surface-2); color: var(--text); border: 1px solid var(--border);
   border-radius: 7px; padding: 7px 12px; cursor: pointer; font: inherit; font-size: 12px; transition: .12s;
