@@ -626,3 +626,63 @@ def group_infra_fields(data: Any, enabled: bool = True) -> Any:
             app["_meta"] = meta
         result.append(app)
     return result
+
+
+# --- Удаление k8s-шума (тогл «strip k8s») -----------------------------------
+# Поля, не несущие диагностической ценности для анализа лога сервиса: идентификаторы
+# пода/контейнера/образа, плоские kubernetes_* из flatten, вложенный kubernetes-объект
+# из event.original. namespace, host и labels по умолчанию тоже убираем — они
+# дублируют то, что есть в service_name/service_instance и не меняются внутри одного
+# job-запуска. Применяется POST-group_infra_fields, т.е. работает с уже собранным _meta.
+
+_K8S_META_PREFIXES: tuple[str, ...] = (
+    "kubernetes_",          # плоские: kubernetes_pod_name, kubernetes_labels_*, …
+)
+_K8S_META_EXACT: frozenset[str] = frozenset({
+    # Эти поля оседают в _meta без prefix'а (при некоторых путях expand):
+    "host",                 # k8s node hostname
+    "pod_name", "pod_id", "pod_ip",
+    "namespace_name",
+    "container_name", "container_hash", "container_image",
+    "docker_id",
+})
+
+
+def _is_k8s_noise_meta_key(key: str) -> bool:
+    kl = key.lower()
+    return kl.startswith(_K8S_META_PREFIXES) or kl in _K8S_META_EXACT
+
+
+def strip_k8s_fields(data: Any) -> Any:
+    """Удаляет k8s-инфраструктурный шум из уже сгруппированных записей.
+
+    Убирает:
+    - плоские kubernetes_* ключи из _meta (pod_name, labels_*, docker_id, …)
+    - ключ 'kubernetes' внутри _meta.event_original (вложенный объект)
+    - отдельные точечные поля (host, pod_ip, container_hash, …) из _meta
+
+    Оставляет всё прикладное (level, msg, timestamp, sql, …) нетронутым.
+    Для записей без _meta и без kubernetes-* полей — no-op.
+    """
+    if not isinstance(data, list):
+        return data
+    result = []
+    for rec in data:
+        if not isinstance(rec, dict):
+            result.append(rec)
+            continue
+        new_rec = {k: v for k, v in rec.items() if k != "_meta"}
+        meta = rec.get("_meta")
+        if isinstance(meta, dict):
+            # Убираем плоские k8s-поля из _meta
+            new_meta = {k: v for k, v in meta.items()
+                        if not _is_k8s_noise_meta_key(k)}
+            # Убираем вложенный kubernetes-объект из event_original (если там dict)
+            ev_orig = new_meta.get("event_original")
+            if isinstance(ev_orig, dict) and "kubernetes" in ev_orig:
+                ev_orig = {k: v for k, v in ev_orig.items() if k != "kubernetes"}
+                new_meta = dict(new_meta, event_original=ev_orig)
+            if new_meta:
+                new_rec["_meta"] = new_meta
+        result.append(new_rec)
+    return result

@@ -14,7 +14,7 @@ from .cleaners import LogCleaner
 from .detectors import FormatDetector, LogFormat
 from .converters import JSONConverter
 from .sql_formatter import format_sql_fields, unescape_sql_in_json
-from .message_expander import expand_message_fields, deep_expand, group_infra_fields
+from .message_expander import expand_message_fields, deep_expand, group_infra_fields, strip_k8s_fields
 from .text_parser import parse_generic_line, is_export_metadata
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,8 @@ class UniversalLogParser:
         format_sql: bool = True,
         # Раскрытие вложенных JSON в message
         expand_message: bool = True,
+        # Удаление k8s-инфраструктурного шума (pod/container/labels/docker)
+        strip_k8s: bool = False,
     ):
         """
         Инициализация универсального парсера логов.
@@ -165,6 +167,9 @@ class UniversalLogParser:
         # Раскрытие вложенных JSON в message
         self.expand_message = expand_message
 
+        # Удаление k8s-инфраструктурного шума
+        self.strip_k8s = strip_k8s
+
     def parse(self, data: str) -> list[dict[str, Any]] | dict[str, Any]:
         """
         Парсинг строковых лог-данных.
@@ -217,6 +222,9 @@ class UniversalLogParser:
         # 5c. Инфраструктурные поля (k8s/docker/под/неймспейс/дубль original) →
         #     в _meta, чтобы наверху остался лог сервиса.
         result = group_infra_fields(result, enabled=self.expand_message)
+        # 5d. Опциональное удаление k8s-шума из _meta (тогл strip_k8s).
+        if self.strip_k8s:
+            result = strip_k8s_fields(result)
 
         # 6. SQL-форматирование
         result = format_sql_fields(result, enabled=self.format_sql)
@@ -288,6 +296,8 @@ class UniversalLogParser:
         result = expand_message_fields(result, enabled=self.expand_message)
         result = deep_expand(result, enabled=self.expand_message)
         result = group_infra_fields(result, enabled=self.expand_message)
+        if self.strip_k8s:
+            result = strip_k8s_fields(result)
         result = format_sql_fields(result, enabled=self.format_sql)
         return result
 

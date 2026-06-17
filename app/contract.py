@@ -75,6 +75,7 @@ class ParseOptions:
     expand_message: bool = True
     compact_json: bool = False  # → indent=None
     format_sql: bool = True
+    strip_k8s: bool = False
 
     @classmethod
     def from_dict(cls, d: Any) -> "ParseOptions":
@@ -90,6 +91,7 @@ class ParseOptions:
             expand_message=_as_bool(d.get("expand_message"), "options.expand_message", True),
             compact_json=_as_bool(d.get("compact_json"), "options.compact_json", False),
             format_sql=_as_bool(d.get("format_sql"), "options.format_sql", True),
+            strip_k8s=_as_bool(d.get("strip_k8s"), "options.strip_k8s", False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -101,6 +103,7 @@ class ParseOptions:
             "expand_message": self.expand_message,
             "compact_json": self.compact_json,
             "format_sql": self.format_sql,
+            "strip_k8s": self.strip_k8s,
         }
 
 

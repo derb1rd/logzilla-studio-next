@@ -175,6 +175,7 @@ def _build_parser(req: ParseRequest) -> UniversalLogParser:
         remove_duplicates=o.remove_duplicates,
         expand_message=o.expand_message,
         format_sql=o.format_sql,
+        strip_k8s=o.strip_k8s,
         indent=None if o.compact_json else 2,
     )
 
