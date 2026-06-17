@@ -197,7 +197,28 @@ class JSONConverter:
                 surplus = len(row) - len(fieldnames)
                 return [delimiter.join(row[: surplus + 1])] + row[surplus + 1:]
             return row
-        payload = delimiter.join(row[jstart:])
+        # Строим payload: пробуем две стратегии сборки.
+        # Стратегия A (простой join): работает когда рвануло только из-за запятой
+        #   в ведущей колонке, а сам payload не расщеплён (v0.8.4-кейс).
+        payload_a = delimiter.join(row[jstart:])
+        # Стратегия B (re-quoted tail): кривое экранирование payload (sql=";" и т.п.)
+        #   заставляет csv.reader закрыть quoted-ячейку досрочно; хвостовые поля
+        #   [jstart+1:] тогда сохраняют двойное `""` encoding И теряют ведущую `"`
+        #   (она ушла на закрытие ячейки). Восстанавливаем: к каждому хвосту добавляем
+        #   `"` и снимаем один уровень `""→"`. Лишняя закрывающая `"` (артефакт
+        #   закрывающей кавычки внешней csv-ячейки в последнем поле) — обрезаем.
+        if row[jstart + 1:]:
+            tail_b = delimiter.join(
+                '"' + f.replace('""', '"') for f in row[jstart + 1:]
+            ).rstrip('"')
+            payload_b = row[jstart] + delimiter + tail_b
+        else:
+            payload_b = None
+        # Выбираем первый вариант, дающий валидный JSON-объект.
+        payload = next(
+            (p for p in (payload_a, payload_b) if p and self._as_json_object(p) is not None),
+            payload_a,  # fallback: хотя бы не рассыпаем на col_N
+        )
         prefix = row[:jstart]
         npre = len(fieldnames) - 1  # колонок до payload-колонки
         if npre >= 1 and len(prefix) > npre:
