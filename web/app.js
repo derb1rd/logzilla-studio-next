@@ -787,7 +787,7 @@ async function doExport() {
     }
     const blob = await r.blob();
     const ext = req.options.ndjson ? "ndjson" : "json";
-    const name = `${baseName(entry.name)}.${ext}`;
+    const name = `${baseName(entry.name)}_${exportTs()}.${ext}`;
     downloadBlob(blob, name);
     if (r.headers.get("X-Truncated") === "true") {
       const total = r.headers.get("X-Total-Records") || "?";
@@ -814,6 +814,8 @@ async function doExportAll() {
   obs.action("export_all_clicked", { files: parsed.length, ndjson });
   setFooter(`Экспорт файлов… (0/${parsed.length})`);
 
+  const ts = exportTs();
+  const nameCounts = new Map();
   const failures = [];
   let truncatedAny = false;
   for (let k = 0; k < parsed.length; k++) {
@@ -828,7 +830,11 @@ async function doExportAll() {
         throw new Error(j.error?.message || r.status);
       }
       if (r.headers.get("X-Truncated") === "true") truncatedAny = true;
-      downloadBlob(await r.blob(), `${baseName(f.name)}.${ext}`);
+      const base = baseName(f.name);
+      const n = (nameCounts.get(base) || 0) + 1;
+      nameCounts.set(base, n);
+      const fname = n > 1 ? `${base}_${ts}_${n}.${ext}` : `${base}_${ts}.${ext}`;
+      downloadBlob(await r.blob(), fname);
       setFooter(`Экспорт файлов… (${k + 1}/${parsed.length})`);
     } catch (e) {
       failures.push(`${f.name}: ${e.message}`);
@@ -857,6 +863,17 @@ function downloadBlob(blob, name) {
 function baseName(name) {
   const dot = name.lastIndexOf(".");
   return (dot > 0 ? name.slice(0, dot) : name).replace(/[^\w.\-]+/g, "_") || "logzilla_export";
+}
+
+// Компактная метка времени для имени файла: 20240617T143022
+function exportTs() {
+  const d = new Date();
+  return d.getFullYear().toString()
+    + String(d.getMonth() + 1).padStart(2, "0")
+    + String(d.getDate()).padStart(2, "0") + "T"
+    + String(d.getHours()).padStart(2, "0")
+    + String(d.getMinutes()).padStart(2, "0")
+    + String(d.getSeconds()).padStart(2, "0");
 }
 
 // --- prefs (localStorage) ---------------------------------------------------
