@@ -578,6 +578,8 @@ def _maybe_structure(value: Any) -> Any:
 _INFRA_PREFIXES: tuple[str, ...] = ("kubernetes", "container_", "docker", "pod_")
 _INFRA_EXACT: frozenset[str] = frozenset({
     "event_original", "namespace_name", "namespace", "service_instance",
+    # Транспорт сборщика логов (fluent-bit/vector): не данные сервиса.
+    "_p", "p", "version", "tags",
 })
 
 
