@@ -481,8 +481,8 @@ function msgCell(rec) {
   return span;
 }
 
-// Обогащённый предпросмотр как безопасный HTML (для инспектора и списков контекста/
-// похожих, где рендер идёт через innerHTML). Те же чипы, но текст экранирован.
+// Обогащённый предпросмотр как безопасный HTML (для инспектора и списков контекста,
+// где рендер идёт через innerHTML). Те же чипы, но текст экранирован.
 function summaryHtml(rec) {
   const c = httpCtxOf(rec);
   const parts = [];
@@ -521,7 +521,7 @@ function selectRow(i) {
   scrollToSelected();
 }
 
-// Выбор записи по идентичности (из контекста/похожих) В ТЕКУЩЕМ файле. Если запись
+// Выбор записи по идентичности (из контекста) В ТЕКУЩЕМ файле. Если запись
 // видна в потоке — подсвечиваем и проматываем; если скрыта фильтром — инспектор
 // всё равно открывает её (с пометкой), поток не трогаем.
 function selectRecord(rec) {
@@ -628,16 +628,13 @@ function renderTab() {
   if (!rec) { body.innerHTML = ""; return; }
   if (state.activeTab === "struct") {
     body.innerHTML = sqlBlockHtml(rec) + jsonHtml(rec) + histoHtml();
-  } else if (state.activeTab === "context") {
-    body.innerHTML = contextHtml();
-    bindCtxRows();
   } else {
-    body.innerHTML = similarHtml(rec);
+    body.innerHTML = contextHtml();
     bindCtxRows();
   }
 }
 
-// Делает строки контекста/похожих кликабельными → выбор той же записи (с учётом
+// Делает строки контекста кликабельными → выбор той же записи (с учётом
 // файла-источника: data-fid). Cross-file клик переключает активный файл.
 function bindCtxRows() {
   $("inspBody").querySelectorAll(".ctx-row[data-ri]").forEach((el) => {
@@ -736,24 +733,6 @@ function contextHtml() {
   return html;
 }
 
-// похожие — записи того же уровня (и источника, если он есть) В АКТИВНОМ файле
-function similarHtml(rec) {
-  const lvl = levelOf(rec);
-  const src = sourceOf(rec);
-  const fid = state.session.activeId;
-  const matches = state.records
-    .map((r, i) => ({ r, i }))
-    .filter(({ r }) => levelOf(r) === lvl && (!src || sourceOf(r) === src));
-  let html = `<div class="histo-label">${ru(matches.length)} записей уровня ${lvl || "?"}${src ? " · " + escapeHtml(src) : ""}</div>`;
-  matches.slice(0, 40).forEach(({ r, i }) => {
-    const center = r === rec ? " center" : "";
-    html += `<div class="ctx-row${center}" data-fid="${fid}" data-ri="${i}"><span class="c-n">${i + 1}</span>` +
-      `<span class="c-ts">${escapeHtml(tsOf(r) || "—")}</span>` +
-      `<span>${summaryHtml(r)}</span></div>`;
-  });
-  return html;
-}
-
 // гистограмма — распределение выбранного уровня по окну предпросмотра (20 бинов)
 function histoHtml() {
   const n = state.records.length;
@@ -783,8 +762,8 @@ async function doExport() {
   if ($("exportScope").value === "all") return doExportAll();
   const entry = activeEntry();
   if (!entry || !entry.request) { setFooter("Сначала выполните парсинг."); return; }
-  const req = { version: "1", parse_request: entry.request, options: { gzip: $("gzip").checked, ndjson: $("ndjson").checked } };
-  obs.action("export_clicked", { gzip: req.options.gzip, ndjson: req.options.ndjson, file: entry.name });
+  const req = { version: "1", parse_request: entry.request, options: { ndjson: $("ndjson").checked } };
+  obs.action("export_clicked", { ndjson: req.options.ndjson, file: entry.name });
   setFooter("Экспорт…");
   try {
     const r = await obs.fetch("/api/export", {
@@ -796,8 +775,7 @@ async function doExport() {
       return;
     }
     const blob = await r.blob();
-    const base = req.options.ndjson ? "ndjson" : "json";
-    const ext = req.options.gzip ? base + ".gz" : base;
+    const ext = req.options.ndjson ? "ndjson" : "json";
     const name = `${baseName(entry.name)}.${ext}`;
     downloadBlob(blob, name);
     if (r.headers.get("X-Truncated") === "true") {
@@ -820,16 +798,16 @@ async function doExport() {
 async function doExportAll() {
   const parsed = state.session.files.filter((f) => f.request && f.status === "parsed");
   if (!parsed.length) { setFooter("Нет распарсенных файлов для экспорта."); return; }
-  const gzip = $("gzip").checked, ndjson = $("ndjson").checked;
-  const ext = (ndjson ? "ndjson" : "json") + (gzip ? ".gz" : "");
-  obs.action("export_all_clicked", { files: parsed.length, gzip, ndjson });
+  const ndjson = $("ndjson").checked;
+  const ext = ndjson ? "ndjson" : "json";
+  obs.action("export_all_clicked", { files: parsed.length, ndjson });
   setFooter(`Экспорт файлов… (0/${parsed.length})`);
 
   const failures = [];
   let truncatedAny = false;
   for (let k = 0; k < parsed.length; k++) {
     const f = parsed[k];
-    const req = { version: "1", parse_request: f.request, options: { gzip, ndjson } };
+    const req = { version: "1", parse_request: f.request, options: { ndjson } };
     try {
       const r = await obs.fetch("/api/export", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req),
@@ -872,7 +850,7 @@ function baseName(name) {
 
 // --- prefs (localStorage) ---------------------------------------------------
 const PREFS_KEY = "logzilla-studio-next.prefs.v1";
-const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "gzip", "ndjson"];
+const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "ndjson"];
 
 function savePrefs() {
   const prefs = {
