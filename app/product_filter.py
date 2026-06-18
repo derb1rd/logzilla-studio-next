@@ -28,7 +28,7 @@ PRODUCT_FIELDS: frozenset[str] = frozenset({
     "ticket_id", "request_id", "id_transfer", "service_id",
     "object_type", "object_code", "object_name", "object_id",
     "doc_type", "doc_type_1c", "doc_id", "doc_date", "is_incoming",
-    # Статус / аудит
+    # Статус / аудит (status не включаем — в реальных логах это HTTP-статус из middleware)
     "action", "severity", "delegate", "labels", "resource",
     # Лог-записи продукта
     "text", "recommendation", "comment", "created_at",
@@ -45,8 +45,6 @@ PRODUCT_FIELDS: frozenset[str] = frozenset({
     "message", "data", "payload", "body", "result",
     "error", "error_code", "error_message",
     "service", "stage_fields", "catalog_fields", "col_config",
-    # Контекстно-зависимые — несут продуктовый смысл наравне с инфра
-    "status",
 })
 
 
@@ -55,13 +53,22 @@ def _filter_one(record: dict) -> dict:
 
 
 def filter_records(data: Any) -> Any:
-    """Рекурсивно оставляет только продуктовые поля из dict/list."""
+    """Рекурсивно оставляет только продуктовые поля из dict/list.
+
+    Записи без продуктовых полей (чистая инфраструктура) из списка исключаются.
+    """
+    if isinstance(data, list):
+        result = []
+        for item in data:
+            filtered = filter_records(item)
+            if isinstance(filtered, dict) and not filtered:
+                continue  # запись стала пустой — нет продуктовых полей, дропаем
+            result.append(filtered)
+        return result
     if isinstance(data, dict):
         filtered = _filter_one(data)
         return {
             k: filter_records(v) if isinstance(v, (dict, list)) else v
             for k, v in filtered.items()
         }
-    if isinstance(data, list):
-        return [filter_records(item) for item in data]
     return data
