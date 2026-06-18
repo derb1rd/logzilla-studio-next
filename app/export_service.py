@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from . import __version__
 from .contract import ExportOptions
 
+try:
+    from logZilla3000.sql_formatter import unescape_sql_in_json as _unescape_sql
+except ImportError:
+    _unescape_sql = None  # type: ignore[assignment]
+
 
 def _dumps(obj, **kw) -> str:
     """json.dumps с отступлением на ensure_ascii=True при одиночных суррогатах
@@ -21,6 +26,18 @@ def _dumps(obj, **kw) -> str:
         return json.dumps(obj, ensure_ascii=False, **kw)
     except UnicodeEncodeError:
         return json.dumps(obj, ensure_ascii=True, **kw)
+
+
+def _dumps_pretty(obj) -> str:
+    """JSON с indent=2 и реальными переносами строк в SQL-полях.
+
+    Применяет ту же постобработку что CLI (unescape_sql_in_json): sql/query/statement
+    получают настоящие \\n вместо escape-последовательностей — файл читабелен.
+    """
+    raw = _dumps(obj, indent=2)
+    if _unescape_sql is not None:
+        raw = _unescape_sql(raw)
+    return raw
 
 
 def _flatten(record: dict, prefix: str = "", sep: str = ".") -> dict:
@@ -58,7 +75,7 @@ def export(records: list[dict], opts: ExportOptions) -> tuple[bytes, str, str]:
         mime, ext = "application/x-ndjson", "ndjson"
     else:
         out = {"_logzilla": _meta(), "records": records}
-        payload = (_dumps(out, indent=2) + "\n").encode("utf-8")
+        payload = (_dumps_pretty(out) + "\n").encode("utf-8")
         mime, ext = "application/json", "json"
     if opts.gzip:
         payload = gzip.compress(payload)
