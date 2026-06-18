@@ -121,6 +121,34 @@ def test_csv_with_multiline_field_detected_and_preserved():
     assert all("json_snippet" not in r and "raw" not in r for r in res.records)
 
 
+def test_jsonl_level_filter_applied():
+    """Регресс: фильтр по уровню для JSONL раньше молча игнорировался (фильтрация
+    шла по сырым строкам только для текст/CSV). Теперь фильтр — на уровне записей и
+    работает для JSON/JSONL тоже."""
+    jsonl = (
+        '{"level":"INFO","msg":"a","ts":"2025-01-15T10:00:00Z"}\n'
+        '{"level":"ERROR","msg":"b","ts":"2025-01-15T11:00:00Z"}\n'
+        '{"level":"WARN","msg":"c","ts":"2025-01-15T12:00:00Z"}'
+    )
+    res = parse(_inline(jsonl, log_levels=["ERROR"]))
+    assert res.format_detected == "jsonl"
+    assert res.metrics.filtered == 1
+    assert res.records[0]["level"] == "ERROR"
+
+
+def test_jsonl_date_filter_applied():
+    """Дата-фильтр работает на JSONL через канонический _ts (раньше — недоступен)."""
+    jsonl = (
+        '{"level":"INFO","msg":"a","ts":"2025-01-15T10:00:00Z"}\n'
+        '{"level":"INFO","msg":"b","ts":"2025-01-16T10:00:00Z"}'
+    )
+    res = parse(_inline(jsonl, date_start="2025-01-16"))
+    assert res.metrics.filtered == 1
+    assert res.records[0]["msg"] == "b"
+    # канонический timestamp проставлен
+    assert "_ts" in res.records[0] and "_ts_iso" in res.records[0]
+
+
 def test_determinism_same_input_same_output():
     a = parse(_inline(SYSLOG)).to_dict()
     b = parse(_inline(SYSLOG)).to_dict()

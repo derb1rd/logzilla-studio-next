@@ -13,13 +13,13 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import re
 import time
 from typing import NamedTuple
 from uuid import uuid4
 
 from logZilla3000 import UniversalLogParser  # ядро (через bootstrap в app/__init__.py)
 from logZilla3000.detectors import FormatDetector
+from logZilla3000.levels import count_levels as _count_levels  # единый источник истины
 
 from .opensearch_normalizer import normalize as _os_normalize
 from .contract import (
@@ -34,79 +34,13 @@ from .logging_setup import log_event
 
 logger = logging.getLogger("studio.parse")
 
-_LEVEL_RE = re.compile(
-    r"\b(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL|TRACE)\b", re.IGNORECASE
-)
-_LEVEL_KEYS = ("level", "levelname", "log_level", "loglevel", "severity", "lvl")
-# Текстовые поля строки лога — для логов без явного поля уровня (напр. plain-text → "raw").
-_TEXT_KEYS = ("message", "msg", "raw", "line", "text", "log")
-_ERROR_LEVELS = {"ERROR", "FATAL", "CRITICAL"}
-_WARN_LEVELS = {"WARN", "WARNING"}
+# Уровень записи, канонизация и счётчики уровней теперь живут в едином модуле ядра
+# logZilla3000.levels (count_levels импортирован выше) — чтобы метрики сервиса и
+# фильтрация ядра считали уровень ОДИНАКОВО (раньше у сервиса был свой, более
+# бедный, набор синонимов).
 
 # Кодировки для fallback при чтении файла (mirror логики ядра parser._read_file).
 _FALLBACK_ENCODINGS = ("utf-8-sig", "cp1251", "koi8-r", "latin-1")
-
-
-def _level_token(value: str) -> str | None:
-    m = _LEVEL_RE.search(value)
-    if not m:
-        return None
-    lvl = m.group(1).upper()
-    return "WARN" if lvl == "WARNING" else lvl
-
-
-# Числовой уровень → имя (зеркало web/core.js levelFromNumber): RFC5424/GELF
-# severity (0–7) и pino/bunyan level (10–60). Диапазон разводит две шкалы.
-_SYSLOG_SEVERITY = ("FATAL", "FATAL", "CRITICAL", "ERROR", "WARN", "INFO", "INFO", "DEBUG")
-_PINO_LEVELS = {10: "TRACE", 20: "DEBUG", 30: "INFO", 40: "WARN", 50: "ERROR", 60: "FATAL"}
-
-
-def _level_from_number(n: object) -> str | None:
-    if not isinstance(n, int) or isinstance(n, bool):
-        return None
-    if 0 <= n <= 7:
-        return _SYSLOG_SEVERITY[n]
-    if 10 <= n <= 60:
-        return _PINO_LEVELS.get(min(60, round(n / 10) * 10))
-    return None
-
-
-def _record_level(record: dict) -> str | None:
-    """Определяет уровень записи: сначала по явному полю уровня, затем по тексту строки лога.
-
-    MED-2: раньше fallback искал уровень во ВСЁМ json.dumps(record), из-за чего слова
-    ERROR/WARN в произвольных полях/значениях ложно завышали счётчики. Теперь fallback
-    ограничен текстовыми полями (_TEXT_KEYS) и берёт первый уровневый токен — как уровень
-    в начале строки лога.
-    """
-    for key in _LEVEL_KEYS:
-        v = record.get(key)
-        if isinstance(v, str):
-            lvl = _level_token(v)
-            if lvl:
-                return lvl
-        elif isinstance(v, int) and not isinstance(v, bool):
-            lvl = _level_from_number(v)
-            if lvl:
-                return lvl
-    for key in _TEXT_KEYS:
-        v = record.get(key)
-        if isinstance(v, str):
-            lvl = _level_token(v)
-            if lvl:
-                return lvl
-    return None
-
-
-def _count_levels(records: list[dict]) -> tuple[int, int]:
-    errors = warnings = 0
-    for rec in records:
-        lvl = _record_level(rec)
-        if lvl in _ERROR_LEVELS:
-            errors += 1
-        elif lvl in _WARN_LEVELS:
-            warnings += 1
-    return errors, warnings
 
 
 def _normalize(result: object) -> list[dict]:
@@ -172,11 +106,15 @@ def _build_parser(req: ParseRequest) -> UniversalLogParser:
     return UniversalLogParser(
         encoding=o.encoding,
         log_levels=o.log_levels or None,
+        date_start=o.date_start or None,
+        date_end=o.date_end or None,
         remove_ansi=o.remove_ansi,
         remove_duplicates=o.remove_duplicates,
         expand_message=o.expand_message,
         format_sql=o.format_sql,
         strip_k8s=o.strip_k8s,
+        normalize_timestamps=o.normalize_timestamps,
+        stitch_multiline=o.stitch_multiline,
         indent=None if o.compact_json else 2,
     )
 

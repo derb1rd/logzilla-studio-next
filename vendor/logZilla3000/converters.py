@@ -504,6 +504,157 @@ class JSONConverter:
                 result.append(record)
         return result
 
+    # CRI/containerd: <RFC3339Nano> (stdout|stderr) (F|P) <message>
+    _CRI_LINE = re.compile(
+        r"^(?P<time>\S+)\s+(?P<stream>stdout|stderr)\s+(?P<logtag>[FP])\s?(?P<message>.*)$"
+    )
+
+    def convert_cri_to_json(self, data: str) -> list[dict[str, Any]]:
+        """CRI/containerd (kubectl logs) → записи {time, stream, message}.
+
+        Частичные строки (logtag=P) — это разрезанный рантаймом по 16 КБ кусок:
+        склеиваем все P-куски с финальным F в одно сообщение. message часто сам
+        JSON — его развернёт постобработка (deep_expand)."""
+        result: list[dict[str, Any]] = []
+        buf: list[str] = []
+        head: Optional[dict[str, Any]] = None
+        for line in data.split("\n"):
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+            m = self._CRI_LINE.match(line)
+            if not m:
+                result.append({"message": line.strip()})
+                continue
+            if head is None:
+                head = {"time": m.group("time"), "stream": m.group("stream")}
+            buf.append(m.group("message"))
+            if m.group("logtag") == "F":  # конец логической строки
+                head["message"] = "".join(buf)
+                result.append(head)
+                head, buf = None, []
+        # Незакрытая partial-последовательность в конце файла — отдаём как есть.
+        if head is not None:
+            head["message"] = "".join(buf)
+            result.append(head)
+        return result
+
+    # CEF/LEEF: ключ=значение в extension; снятие экранирования \| \= \\ \n \t \r.
+    _CEF_KV = re.compile(
+        r"([A-Za-z][\w.]*)=((?:\\.|[^\\])*?)(?=\s+[A-Za-z][\w.]*=|$)"
+    )
+    _CEF_UNESCAPE = re.compile(r"\\(.)")
+    _CEF_ESCAPES = {"n": "\n", "t": "\t", "r": "\r"}
+
+    @staticmethod
+    def _split_escaped(s: str, sep: str, maxsplit: int) -> list[str]:
+        """split по sep с учётом экранирования `\\sep`; снимает экранирование."""
+        parts: list[str] = []
+        cur: list[str] = []
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c == "\\" and i + 1 < len(s):
+                cur.append(s[i + 1])
+                i += 2
+                continue
+            if c == sep and len(parts) < maxsplit:
+                parts.append("".join(cur))
+                cur = []
+                i += 1
+                continue
+            cur.append(c)
+            i += 1
+        parts.append("".join(cur))
+        return parts
+
+    def _cef_unescape(self, v: str) -> str:
+        return self._CEF_UNESCAPE.sub(
+            lambda m: self._CEF_ESCAPES.get(m.group(1), m.group(1)), v
+        )
+
+    def _put_kv(self, rec: dict, key: str, raw: str) -> None:
+        v: Any = self._cef_unescape(raw)
+        if self.coerce_types:
+            v = self._coerce_type(v)
+        rec[self._normalize_key(key) if self.normalize_keys else key] = v
+
+    def convert_cef_to_json(self, data: str) -> list[dict[str, Any]]:
+        """CEF (ArcSight) → записи: 7 pipe-полей шапки + разбор extension k=v."""
+        names = (
+            "cef_version", "device_vendor", "device_product", "device_version",
+            "signature_id", "name", "severity",
+        )
+        result: list[dict[str, Any]] = []
+        for line in data.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if not line.startswith("CEF:"):
+                result.append({"message": line})
+                continue
+            fields = self._split_escaped(line[4:], "|", 7)  # до 8 частей
+            rec: dict[str, Any] = {}
+            for name, val in zip(names, fields):
+                rec[name] = val
+            ext = fields[7] if len(fields) > 7 else ""
+            for key, raw in self._CEF_KV.findall(ext):
+                self._put_kv(rec, key, raw)
+            result.append(rec)
+        return result
+
+    @staticmethod
+    def _leef_delim(spec: str) -> str:
+        """Делиметр extension LEEF 2.0: 'x09'/'0x09' → таб, одиночный символ → он сам."""
+        s = spec.strip()
+        low = s.lower()
+        if low.startswith(("x", "0x")):
+            hexpart = low[2:] if low.startswith("0x") else low[1:]
+            try:
+                return chr(int(hexpart, 16))
+            except ValueError:
+                return "\t"
+        return s[0] if len(s) == 1 else "\t"
+
+    def convert_leef_to_json(self, data: str) -> list[dict[str, Any]]:
+        """LEEF (IBM QRadar) → записи: 5 pipe-полей шапки + extension k=v.
+
+        LEEF 1.0: extension с табом-делимитером. LEEF 2.0: после EventID может идти
+        поле-делимитер (`^`/`x09`), затем extension. Если делимитер в extension не
+        встречается — фолбэк на пробел.
+        """
+        result: list[dict[str, Any]] = []
+        for line in data.split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if not line.startswith("LEEF:"):
+                result.append({"message": line})
+                continue
+            parts = self._split_escaped(line[5:], "|", 6)  # до 7 частей
+            rec: dict[str, Any] = {"leef_version": parts[0] if parts else ""}
+            for idx, name in enumerate(
+                ("vendor", "product", "product_version", "event_id"), start=1
+            ):
+                if idx < len(parts):
+                    rec[name] = parts[idx]
+            version = rec["leef_version"]
+            if version.startswith("2") and len(parts) >= 7:
+                delim = self._leef_delim(parts[5])
+                ext = parts[6]
+            else:
+                delim = "\t"
+                ext = parts[5] if len(parts) > 5 else ""
+            if delim not in ext and "\t" not in ext:
+                delim = " "
+            for pair in ext.split(delim):
+                if "=" in pair:
+                    key, raw = pair.split("=", 1)
+                    if key.strip():
+                        self._put_kv(rec, key.strip(), raw)
+            result.append(rec)
+        return result
+
     def convert_loki_nginx_to_json(self, data: str) -> dict:
         """
         Конвертация Loki-prefixed ingress-nginx логов в JSON.

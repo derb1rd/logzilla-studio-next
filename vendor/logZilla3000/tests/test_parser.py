@@ -80,26 +80,6 @@ class TestLogCleaner(unittest.TestCase):
         clean = self.cleaner.clean(data)
         self.assertNotIn("\x00", clean)
 
-    def test_extract_fields(self):
-        """Извлечение структурированных полей."""
-        text = "Request from 192.168.1.100 at 2025-01-15T10:30:00 to https://example.com/api"
-        fields = self.cleaner.extract_fields(text)
-        self.assertIn("ip_address", fields)
-        self.assertIn("timestamp_iso", fields)
-        self.assertIn("url", fields)
-
-    def test_filter_by_level(self):
-        """Фильтрация по уровню логирования."""
-        lines = [
-            "2025-01-15 INFO  OK",
-            "2025-01-15 DEBUG Debug msg",
-            "2025-01-15 ERROR Error msg",
-            "2025-01-15 WARN Warning msg",
-        ]
-        filtered = self.cleaner.filter_by_level(lines, ["ERROR", "WARN"])
-        self.assertEqual(len(filtered), 2)
-        self.assertTrue(all("ERROR" in l or "WARN" in l for l in filtered))
-
     def test_keep_patterns(self):
         """Сохранение строк по паттерну даже при дедупликации."""
         cleaner = LogCleaner(

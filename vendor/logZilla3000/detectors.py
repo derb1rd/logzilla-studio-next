@@ -25,6 +25,9 @@ class LogFormat(Enum):
     LOKI_NGINX = "loki_nginx"
     SYSLOG = "syslog"
     LOGFMT = "logfmt"  # key=value пары (Go/Grafana/Heroku/systemd)
+    CRI = "cri"  # CRI/containerd (kubectl logs): <RFC3339Nano> stream F|P msg
+    CEF = "cef"  # ArcSight Common Event Format (security/SIEM)
+    LEEF = "leef"  # IBM QRadar Log Event Extended Format
     TEXT = "text"  # Произвольный текстовый лог
     UNKNOWN = "unknown"
 
@@ -85,6 +88,15 @@ class FormatDetector:
         r"\b(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL|TRACE)\b",
         re.IGNORECASE,
     )
+
+    # CRI/containerd (kubectl logs): RFC3339Nano stream(stdout|stderr) logtag(F|P) msg
+    CRI_LINE = re.compile(
+        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\s+"
+        r"(?:stdout|stderr)\s+[FP]\s"
+    )
+    # CEF/LEEF — по префиксу с версией (дёшево и однозначно).
+    CEF_PREFIX = re.compile(r"^CEF:\d+\|")
+    LEEF_PREFIX = re.compile(r"^LEEF:\d+(?:\.\d+)?\|")
 
     # Паттерн для определения JSON
     JSON_PATTERN = re.compile(r"^\s*[\{\[]")
@@ -160,6 +172,12 @@ class FormatDetector:
         json_format = self._detect_json(sample)
         if json_format:
             return json_format
+
+        # 1b. CEF/LEEF/CRI — по строгим однозначным признакам (префикс/жёсткая
+        #     грамматика), дёшево и без конфликтов с прочими форматами.
+        prefixed = self._detect_prefixed(sample)
+        if prefixed:
+            return prefixed
 
         # 2. Проверяем CSV / TSV на ОБРАМЛЁННОМ тексте (снятие over-quoting +
         #    пропуск преамбулы), чтобы обёрнутые/с-титулом экспорты не уезжали в
@@ -437,6 +455,25 @@ class FormatDetector:
                 good += 1
 
         return good >= len(non_empty) * 0.6
+
+    def _detect_prefixed(self, sample: list) -> Optional[LogFormat]:
+        """CEF/LEEF (по префиксу) и CRI/containerd (по жёсткой грамматике строки).
+
+        Все три имеют однозначные маркеры начала строки, поэтому проверяются рано
+        и без риска перепутать с CSV/text. Порог 0.6 — устойчив к редким
+        не-record строкам (пустые/баннер) в выборке.
+        """
+        non_empty = [line.strip() for line in sample if line.strip()]
+        if not non_empty:
+            return None
+        n = len(non_empty)
+        if sum(1 for l in non_empty if self.CEF_PREFIX.match(l)) >= n * 0.6:
+            return LogFormat.CEF
+        if sum(1 for l in non_empty if self.LEEF_PREFIX.match(l)) >= n * 0.6:
+            return LogFormat.LEEF
+        if sum(1 for l in non_empty if self.CRI_LINE.match(l)) >= n * 0.6:
+            return LogFormat.CRI
+        return None
 
     def _detect_loki_nginx(self, sample: list) -> Optional[LogFormat]:
         """Проверка, является ли данные Loki-prefixed nginx логами."""

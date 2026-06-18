@@ -3,11 +3,19 @@ logZilla3000 — Универсальный парсер логов.
 Очищает логи от мусора и преобразует в JSON.
 
 Поддерживаемые форматы:
-- CSV (с разделителями: запятая, точка с запятой, табуляция)
-- Текстовые логи (Apache, Nginx, syslog, произвольные)
+- CSV/TSV (с разделителями: запятая, точка с запятой, табуляция)
+- Текстовые логи (Apache, Nginx, syslog RFC3164/RFC5424, klog/glog, произвольные)
 - JSON (валидация и нормализация)
 - JSONL / NDJSON (JSON Lines)
+- logfmt (key=value)
+- CRI / containerd (kubectl logs)
+- CEF (ArcSight) / LEEF (IBM QRadar) — security/SIEM
 - Полуструктурированные логи (смешанные форматы)
+
+Дополнительно ко всем форматам: канонический timestamp (_ts/_ts_iso из ISO/BSD/
+Apache/klog/epoch), сшивка стек-трейсов в поле stack, фильтрация по уровню/дате на
+уровне записей. Кастомный текстовый log_format (nginx и т.п.) — через параметр
+pattern.
 
 Использование CLI:
     python3 -m logZilla3000 файл.csv

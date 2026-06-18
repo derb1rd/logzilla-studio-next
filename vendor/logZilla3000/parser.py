@@ -8,6 +8,7 @@
 import json
 import logging
 import os
+import re
 from typing import Any, Optional, Union
 
 from .cleaners import LogCleaner
@@ -16,6 +17,9 @@ from .converters import JSONConverter
 from .sql_formatter import format_sql_fields, unescape_sql_in_json
 from .message_expander import expand_message_fields, deep_expand, group_infra_fields, strip_k8s_fields
 from .text_parser import parse_generic_line, is_export_metadata
+from .timestamps import add_canonical_ts, normalize_ts
+from .levels import matches_levels
+from .multiline import stitch_records
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +102,10 @@ class UniversalLogParser:
         expand_message: bool = True,
         # Удаление k8s-инфраструктурного шума (pod/container/labels/docker)
         strip_k8s: bool = False,
+        # Канонизация времени: проставлять _ts/_ts_iso каждой записи
+        normalize_timestamps: bool = True,
+        # Сшивка многострочных записей (стек-трейсы) в поле stack
+        stitch_multiline: bool = True,
     ):
         """
         Инициализация универсального парсера логов.
@@ -170,6 +178,10 @@ class UniversalLogParser:
         # Удаление k8s-инфраструктурного шума
         self.strip_k8s = strip_k8s
 
+        # Канонизация времени и сшивка многострочных записей
+        self.normalize_timestamps = normalize_timestamps
+        self.stitch_multiline = stitch_multiline
+
     def parse(self, data: str) -> list[dict[str, Any]] | dict[str, Any]:
         """
         Парсинг строковых лог-данных.
@@ -198,19 +210,18 @@ class UniversalLogParser:
                 logger.debug("Формат принудительно установлен как CSV (has_header/header)")
 
         # 2. Очистка под формат: для табличных — щадящая (не искажаем ячейки),
-        #    для остальных — полная.
+        #    для структурных построчных (JSON/JSONL/CRI/CEF/LEEF) — минимальная
+        #    (схлопывание пробелов/strip исказили бы JSON-сообщения и значения
+        #    extension), для остального текста — полная.
         if fmt in (LogFormat.CSV, LogFormat.TSV):
             cleaned = self.cleaner.clean_tabular(data)
-        elif fmt in (LogFormat.JSON, LogFormat.JSONL):
+        elif fmt in self._GENTLE_CLEAN_FORMATS:
             cleaned = self._clean_json_content(data)
         else:
             cleaned = self.cleaner.clean(data)
         logger.debug("Очистка завершена, длина: %d → %d", len(data), len(cleaned))
 
-        # 3. Фильтрация
-        cleaned = self._apply_filters(cleaned, fmt)
-
-        # 4. Конвертация в JSON
+        # 4. Конвертация в JSON (фильтрация — постпроходом на уровне записей, см. шаг 8)
         result = self._convert(cleaned, fmt)
 
         # 5. Распаковка JSON-колонок (CSV/TSV) + раскрытие вложенных JSON в message
@@ -228,6 +239,15 @@ class UniversalLogParser:
 
         # 6. SQL-форматирование
         result = format_sql_fields(result, enabled=self.format_sql)
+
+        # 6.5. Сшивка стек-трейсов/продолжений в поле stack (только текст/syslog/cri).
+        result = self._maybe_stitch(result, fmt)
+
+        # 7. Канонический timestamp (_ts/_ts_iso) — основа сортировки и дата-фильтра.
+        result = add_canonical_ts(result, enabled=self.normalize_timestamps)
+
+        # 8. Фильтрация на уровне записей (уровень + дата), единая для всех форматов.
+        result = self._filter_records(result)
 
         return result
 
@@ -288,9 +308,6 @@ class UniversalLogParser:
         else:
             cleaned = self.cleaner.clean(content)
 
-        # Фильтрация (даже при определении формата по расширению)
-        cleaned = self._apply_filters(cleaned, fmt)
-
         result = self._convert(cleaned, fmt)
         result = self._expand_json_columns(result, fmt)
         result = expand_message_fields(result, enabled=self.expand_message)
@@ -299,7 +316,26 @@ class UniversalLogParser:
         if self.strip_k8s:
             result = strip_k8s_fields(result)
         result = format_sql_fields(result, enabled=self.format_sql)
+        result = self._maybe_stitch(result, fmt)
+        result = add_canonical_ts(result, enabled=self.normalize_timestamps)
+        result = self._filter_records(result)
         return result
+
+    # Форматы, где строки лога фрагментируются по \n и нуждаются в сшивке
+    # (стек-трейсы/продолжения). Web/CSV/JSON/JSONL/logfmt/CEF — однострочные.
+    _STITCH_FORMATS = (LogFormat.TEXT, LogFormat.SYSLOG, LogFormat.UNKNOWN)
+
+    # Структурные построчные форматы: минимальная очистка (не схлопываем пробелы
+    # и не делаем strip — это исказило бы JSON-сообщения CRI и значения extension).
+    _GENTLE_CLEAN_FORMATS = (
+        LogFormat.JSON, LogFormat.JSONL, LogFormat.CRI, LogFormat.CEF, LogFormat.LEEF,
+    )
+
+    def _maybe_stitch(self, result: Any, fmt: LogFormat) -> Any:
+        """Сшивка многострочных записей для текст-подобных форматов (по флагу)."""
+        if not self.stitch_multiline or fmt not in self._STITCH_FORMATS:
+            return result
+        return stitch_records(result)
 
     def parse_files(self, filepaths: list[str]) -> list[dict[str, Any]]:
         """
@@ -364,40 +400,59 @@ class UniversalLogParser:
             f.write(json_str)
             f.write("\n")
 
-    def _apply_filters(self, cleaned: str, fmt: LogFormat) -> str:
-        """Применение фильтров по уровню и дате к очищенным данным."""
-        # Фильтрация построчно (для текстовых форматов)
-        if fmt in (LogFormat.TEXT, LogFormat.APACHE, LogFormat.NGINX, LogFormat.SYSLOG, LogFormat.LOKI_NGINX, LogFormat.LOGFMT):
-            lines = cleaned.split("\n")
-            if self.log_levels:
-                lines = self.cleaner.filter_by_level(lines, self.log_levels)
-                logger.debug("Фильтрация по уровням %s: осталось %d строк", self.log_levels, len(lines))
-            if self.date_start or self.date_end:
-                lines = self.cleaner.filter_by_date_range(
-                    lines, self.date_start, self.date_end
-                )
-                logger.debug("Фильтрация по дате: осталось %d строк", len(lines))
-            cleaned = "\n".join(lines)
+    def _filter_records(self, result: Any) -> Any:
+        """Фильтрация по уровню и дате НА УРОВНЕ ЗАПИСЕЙ — единая для всех форматов.
 
-        # Фильтрация для табличных форматов (с сохранением заголовка)
-        if fmt in (LogFormat.CSV, LogFormat.TSV):
-            lines = cleaned.split("\n")
-            if self.log_levels and len(lines) > 1:
-                hdr = lines[0]
-                data_lines = self.cleaner.filter_by_level(lines[1:], self.log_levels)
-                lines = [hdr] + data_lines
-                logger.debug("Фильтрация CSV по уровням: осталось %d строк", len(data_lines))
-            if self.date_start or self.date_end:
-                if len(lines) > 1:
-                    hdr = lines[0]
-                    data_lines = self.cleaner.filter_by_date_range(
-                        lines[1:], self.date_start, self.date_end
-                    )
-                    lines = [hdr] + data_lines
-                    logger.debug("Фильтрация CSV по дате: осталось %d строк", len(data_lines))
-            cleaned = "\n".join(lines)
+        Раньше фильтр работал по сырым строкам ДО конвертации и только для
+        текстовых/web/CSV форматов: JSON/JSONL молча не фильтровались вовсе
+        (log_levels=["ERROR"] возвращал всё), а дата-фильтр знал лишь 4 текстовых
+        формата. Теперь уровень берётся через единый record_level (logZilla3000.levels),
+        дата — через канонический _ts (см. add_canonical_ts), и это работает
+        одинаково для JSON, JSONL, logfmt, syslog, CSV и текста.
 
-        return cleaned
+        Записи без распознанного _ts при заданном дата-фильтре НЕ отбрасываются
+        (нельзя судить о времени — не теряем данные молча). Запись без уровня при
+        заданном фильтре уровней отбрасывается — это и есть смысл «только ERROR».
+        """
+        if not isinstance(result, list):
+            return result
+        levels = self.log_levels
+        ds = self._date_bound(self.date_start, end=False)
+        de = self._date_bound(self.date_end, end=True)
+        if not levels and ds is None and de is None:
+            return result
+
+        out: list[Any] = []
+        for rec in result:
+            if not isinstance(rec, dict):
+                out.append(rec)
+                continue
+            if levels and not matches_levels(rec, levels):
+                continue
+            if ds is not None or de is not None:
+                ts = rec.get("_ts")
+                if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+                    if ds is not None and ts < ds:
+                        continue
+                    if de is not None and ts > de:
+                        continue
+            out.append(rec)
+        return out
+
+    @staticmethod
+    def _date_bound(value: Optional[str], end: bool) -> Optional[float]:
+        """Граница дата-фильтра (ISO-строка) → epoch-секунды или None.
+
+        Допускает дату без времени (YYYY-MM-DD): для нижней границы → начало суток,
+        для верхней → конец суток, чтобы «по 2025-01-15» включал весь день.
+        """
+        if not value:
+            return None
+        res = normalize_ts(value)
+        if res is None and re.match(r"^\d{4}-\d{2}-\d{2}$", value.strip()):
+            suffix = "T23:59:59" if end else "T00:00:00"
+            res = normalize_ts(value.strip() + suffix)
+        return res[1] if res else None
 
     def _convert(self, cleaned: str, fmt: LogFormat) -> Any:
         """Конвертация очищенных данных в зависимости от формата."""
@@ -433,6 +488,15 @@ class UniversalLogParser:
 
         elif fmt == LogFormat.LOGFMT:
             return self.converter.convert_logfmt_to_json(cleaned)
+
+        elif fmt == LogFormat.CRI:
+            return self.converter.convert_cri_to_json(cleaned)
+
+        elif fmt == LogFormat.CEF:
+            return self.converter.convert_cef_to_json(cleaned)
+
+        elif fmt == LogFormat.LEEF:
+            return self.converter.convert_leef_to_json(cleaned)
 
         elif fmt == LogFormat.TEXT:
             if self.pattern:

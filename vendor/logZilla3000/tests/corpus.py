@@ -325,6 +325,74 @@ CASES: list[dict] = [
         "count": 2,
     },
 
+    # ===================== CRI / containerd (kubectl logs) =====================
+    {
+        # CRI/containerd: <RFC3339Nano> stream F|P msg. message-JSON раскрывается.
+        "name": "cri-containerd",
+        "raw": '2024-05-01T10:00:00.123456789Z stdout F {"level":"info","msg":"started"}\n'
+               '2024-05-01T10:00:01.000000000Z stderr F boom',
+        "fmt": "cri",
+        "checks": {"stream": "stdout", "message": {"level": "info", "msg": "started"}},
+        "present": ["_ts", "_ts_iso"],
+        "count": 2,
+    },
+    {
+        # Partial-строки (logtag=P) рантайм режет по 16 КБ — склеиваются с финальной F.
+        "name": "cri-partial-merge",
+        "raw": '2024-05-01T10:00:00.1Z stdout P first chunk \n'
+               '2024-05-01T10:00:00.2Z stdout F second',
+        "fmt": "cri",
+        "checks": {"message": "first chunk second"},
+        "count": 1,
+    },
+
+    # ============================ CEF / LEEF (SIEM) ============================
+    {
+        "name": "cef-arcsight",
+        "raw": 'CEF:0|Security|threatmanager|1.0|100|worm successfully stopped|10|src=10.0.0.1 dst=2.1.2.2 spt=1232\n'
+               'CEF:0|Security|threatmanager|1.0|101|port scan|8|src=10.0.0.3 dst=2.1.2.2',
+        "fmt": "cef",
+        "checks": {"device_vendor": "Security", "name": "worm successfully stopped",
+                   "src": "10.0.0.1", "spt": 1232},
+        "count": 2,
+    },
+    {
+        "name": "leef-qradar",
+        "raw": 'LEEF:1.0|Lancope|StealthWatch|1.0|41|src=192.0.2.0\tdst=172.50.123.1\tsev=5\n'
+               'LEEF:1.0|Lancope|StealthWatch|1.0|42|src=192.0.2.9\tdst=172.50.123.2\tsev=3',
+        "fmt": "leef",
+        "checks": {"vendor": "Lancope", "event_id": "41", "src": "192.0.2.0", "sev": 5},
+        "count": 2,
+    },
+
+    # ===================== многострочные записи (стек-трейсы) =====================
+    {
+        # Java-трейс под лог-строкой: кадры сшиваются в поле stack, а не плодят
+        # мусорные {message}. Запись остаётся одна на исключение.
+        "name": "java-stacktrace-stitched",
+        "raw": "2023-01-02 03:04:05,123 ERROR [main] com.foo.Bar - boom\n"
+               "java.lang.NullPointerException: x is null\n"
+               "\tat com.foo.Bar.run(Bar.java:10)\n"
+               "\tat com.foo.Baz.call(Baz.java:20)\n"
+               "2023-01-02 03:04:06,000 INFO [main] com.foo.Bar - recovered",
+        "fmt": "text",
+        "checks": {"level": "ERROR", "message": "boom"},
+        "present": ["stack"],
+        "count": 2,
+    },
+
+    # ===================== канонический timestamp (_ts/_ts_iso) =====================
+    {
+        # Unix epoch в поле ts → нормализуется в _ts/_ts_iso (раньше не распознавался).
+        "name": "jsonl-epoch-ts",
+        "raw": '{"ts":1736935800,"level":"INFO","msg":"a"}\n'
+               '{"ts":1736935860,"level":"ERROR","msg":"b"}',
+        "fmt": "jsonl",
+        "checks": {"_ts_iso": "2025-01-15T10:10:00Z"},
+        "present": ["_ts"],
+        "count": 2,
+    },
+
     # ============================ анти-кейсы ============================
     # Проза со случайными запятыми НЕ должна стать CSV.
     {

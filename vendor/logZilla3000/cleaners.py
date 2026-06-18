@@ -10,7 +10,6 @@ import csv
 import io
 import html
 import logging
-from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -126,43 +125,6 @@ class LogCleaner:
         # Управляющие символы (кроме \n, \r, \t)
         re.compile(r"[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]"),
     ]
-
-    # Паттерны для извлечения полезных данных
-    USEFUL_PATTERNS = {
-        "ip_address": re.compile(
-            r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
-            r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
-        ),
-        "url": re.compile(
-            r"https?://[^\s<>\"']+" 
-        ),
-        "email": re.compile(
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
-        ),
-        "timestamp_iso": re.compile(
-            r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}"
-            r"(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?\b"
-        ),
-        "timestamp_common": re.compile(
-            r"\b\d{2}[/.]\d{2}[/.]\d{2,4}\s+\d{2}:\d{2}:\d{2}\b"
-        ),
-        "http_method": re.compile(
-            r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE)\b"
-        ),
-        "http_status": re.compile(
-            r"\b(?:HTTP/[\d.]+\s+)?(\d{3})\b"
-        ),
-        "uuid": re.compile(
-            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}"
-            r"-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
-        ),
-        "json_snippet": re.compile(
-            r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
-        ),
-        "xml_snippet": re.compile(
-            r"<[a-zA-Z][^>]*>.*?</[a-zA-Z]+>|<[a-zA-Z][^>]*/>"
-        ),
-    }
 
     def __init__(
         self,
@@ -327,131 +289,7 @@ class LogCleaner:
 
         return result
 
-    def extract_fields(self, text: str) -> dict:
-        """
-        Извлечение структурированных полей из текста лога.
-
-        Args:
-            text: Очищенный текст лога
-
-        Returns:
-            Словарь с извлечёнными полями
-        """
-        fields = {}
-
-        for name, pattern in self.USEFUL_PATTERNS.items():
-            matches = pattern.findall(text)
-            if matches:
-                # Убираем дубликаты, сохраняя порядок
-                unique_matches = list(dict.fromkeys(matches))
-                if len(unique_matches) == 1:
-                    fields[name] = unique_matches[0]
-                else:
-                    fields[name] = unique_matches
-
-        return fields
-
-    def filter_by_level(
-        self, lines: list, levels: Optional[list] = None
-    ) -> list:
-        """
-        Фильтрация строк по уровню логирования.
-
-        Args:
-            lines: Список строк лога
-            levels: Список уровней для сохранения (например ['ERROR', 'WARN'])
-                    Если None — возвращаются все строки
-
-        Returns:
-            Отфильтрованный список строк
-        """
-        if levels is None:
-            return lines
-
-        level_pattern = re.compile(
-            r"\b(" + "|".join(re.escape(l) for l in levels) + r")\b",
-            re.IGNORECASE,
-        )
-
-        return [line for line in lines if level_pattern.search(line)]
-
-    def filter_by_date_range(
-        self,
-        lines: list,
-        start: Optional[str] = None,
-        end: Optional[str] = None,
-        keep_no_timestamp: bool = True,
-    ) -> list:
-        """
-        Фильтрация строк по диапазону дат.
-
-        Args:
-            lines: Список строк лога
-            start: Начальная дата в формате ISO (опционально)
-            end: Конечная дата в формате ISO (опционально)
-            keep_no_timestamp: Сохранять строки без распознаваемого таймстампа
-                              (по умолчанию True — обратная совместимость)
-
-        Returns:
-            Отфильтрованный список строк
-        """
-        if start is None and end is None:
-            return lines
-
-        # Границы приводим к naive (без tzinfo): таймстампы строк парсятся strptime'ом
-        # как naive, а сравнение aware и naive datetime бросает TypeError. Делаем обе
-        # стороны naive, чтобы фильтр был консистентным и не падал на ISO-границе с Z.
-        def _naive(s: str) -> datetime:
-            return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
-
-        start_dt = _naive(start) if start else None
-        end_dt = _naive(end) if end else None
-
-        result: list[str] = []
-        for line in lines:
-            # Пробуем найти timestamp в строке
-            ts_match = self.USEFUL_PATTERNS["timestamp_iso"].search(line)
-            if not ts_match:
-                ts_match = self.USEFUL_PATTERNS["timestamp_common"].search(line)
-
-            if not ts_match:
-                # Строка без таймстампа
-                if keep_no_timestamp:
-                    result.append(line)
-                continue
-
-            try:
-                ts_str = ts_match.group()
-                # Пробуем разные форматы
-                for fmt in (
-                    "%Y-%m-%dT%H:%M:%S",
-                    "%Y-%m-%d %H:%M:%S",
-                    "%d.%m.%Y %H:%M:%S",
-                    "%d/%m/%Y %H:%M:%S",
-                ):
-                    try:
-                        line_dt = datetime.strptime(
-                            ts_str.split(".")[0].split("+")[0].split("Z")[0],
-                            fmt,
-                        )
-                        break
-                    except ValueError:
-                        continue
-                else:
-                    # Таймстамп найден, но не распознан
-                    if keep_no_timestamp:
-                        result.append(line)
-                    continue
-
-                if start_dt and line_dt < start_dt:
-                    continue
-                if end_dt and line_dt > end_dt:
-                    continue
-
-                result.append(line)
-
-            except (ValueError, IndexError):
-                if keep_no_timestamp:
-                    result.append(line)
-
-        return result
+    # Извлечение полей регэкспами (extract_fields) и построчная фильтрация по
+    # уровню/дате (filter_by_level / filter_by_date_range) удалены: фильтрация
+    # переехала на уровень записей (parser._filter_records + logZilla3000.levels +
+    # канонический _ts), а «угадывание полей» — на структурный разбор text_parser.

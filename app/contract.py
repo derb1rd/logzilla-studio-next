@@ -70,12 +70,16 @@ class ParseOptions:
 
     encoding: str = "utf-8"
     log_levels: list[str] = field(default_factory=list)  # пустой список = все уровни
+    date_start: str = ""  # ISO-граница фильтра по времени (пусто = без нижней границы)
+    date_end: str = ""    # ISO-граница фильтра по времени (пусто = без верхней границы)
     remove_duplicates: bool = True
     remove_ansi: bool = True
     expand_message: bool = True
     compact_json: bool = False  # → indent=None
     format_sql: bool = True
     strip_k8s: bool = False
+    normalize_timestamps: bool = True  # проставлять _ts/_ts_iso
+    stitch_multiline: bool = True      # сшивать стек-трейсы в поле stack
 
     @classmethod
     def from_dict(cls, d: Any) -> "ParseOptions":
@@ -86,24 +90,32 @@ class ParseOptions:
         return cls(
             encoding=_as_str(d.get("encoding"), "options.encoding", "utf-8"),
             log_levels=[x.strip().upper() for x in levels if x.strip()],
+            date_start=_as_str(d.get("date_start"), "options.date_start", ""),
+            date_end=_as_str(d.get("date_end"), "options.date_end", ""),
             remove_duplicates=_as_bool(d.get("remove_duplicates"), "options.remove_duplicates", True),
             remove_ansi=_as_bool(d.get("remove_ansi"), "options.remove_ansi", True),
             expand_message=_as_bool(d.get("expand_message"), "options.expand_message", True),
             compact_json=_as_bool(d.get("compact_json"), "options.compact_json", False),
             format_sql=_as_bool(d.get("format_sql"), "options.format_sql", True),
             strip_k8s=_as_bool(d.get("strip_k8s"), "options.strip_k8s", False),
+            normalize_timestamps=_as_bool(d.get("normalize_timestamps"), "options.normalize_timestamps", True),
+            stitch_multiline=_as_bool(d.get("stitch_multiline"), "options.stitch_multiline", True),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "encoding": self.encoding,
             "log_levels": self.log_levels,
+            "date_start": self.date_start,
+            "date_end": self.date_end,
             "remove_duplicates": self.remove_duplicates,
             "remove_ansi": self.remove_ansi,
             "expand_message": self.expand_message,
             "compact_json": self.compact_json,
             "format_sql": self.format_sql,
             "strip_k8s": self.strip_k8s,
+            "normalize_timestamps": self.normalize_timestamps,
+            "stitch_multiline": self.stitch_multiline,
         }
 
 
