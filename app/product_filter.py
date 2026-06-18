@@ -63,6 +63,29 @@ _ANCHOR: frozenset[str] = frozenset({
 _BLOCKED: frozenset[str] = ALL_INFRASTRUCTURE - _ANCHOR
 
 
+def _expand_meta(record: dict) -> dict:
+    """Разворачивает блок _meta в плоскую структуру записи.
+
+    Поля внутри _meta поднимаются на верхний уровень; вложенные объекты
+    (event_original и др.) тоже раскрываются на один уровень вглубь.
+    Существующие верхнеуровневые поля не перезаписываются.
+    """
+    meta = record.get("_meta")
+    if not isinstance(meta, dict):
+        return record
+
+    result = {k: v for k, v in record.items() if k != "_meta"}
+    for k, v in meta.items():
+        if isinstance(v, dict):
+            for kk, vv in v.items():
+                if kk not in result:
+                    result[kk] = vv
+        else:
+            if k not in result:
+                result[k] = v
+    return result
+
+
 def _filter_one(record: dict) -> dict:
     return {k: v for k, v in record.items() if k.lower() not in _BLOCKED}
 
@@ -70,6 +93,7 @@ def _filter_one(record: dict) -> dict:
 def filter_records(data: Any) -> Any:
     """Рекурсивно удаляет инфраструктурные поля из dict/list.
 
+    Перед фильтрацией разворачивает блок _meta в плоские поля.
     Записи, из которых после фильтра ничего не осталось, исключаются.
     """
     if isinstance(data, list):
@@ -81,7 +105,8 @@ def filter_records(data: Any) -> Any:
             result.append(filtered)
         return result
     if isinstance(data, dict):
-        filtered = _filter_one(data)
+        expanded = _expand_meta(data)
+        filtered = _filter_one(expanded)
         return {
             k: filter_records(v) if isinstance(v, (dict, list)) else v
             for k, v in filtered.items()
