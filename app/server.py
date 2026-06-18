@@ -233,9 +233,10 @@ def run(host: str = "127.0.0.1", port: int = 8765) -> None:
 
 
 def main() -> None:
+    import os
     ap = argparse.ArgumentParser(description="logzilla-studio HTTP-сервер")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
     args = ap.parse_args()
     run(host=args.host, port=args.port)
 

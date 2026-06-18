@@ -363,6 +363,58 @@ function updateFilterBreadcrumb() {
 // Уровни с выключенной плиткой — скрываем в потоке мгновенно (клиентский фильтр).
 // Это поверх серверного: плитки уходят в options.log_levels при следующем «Парсить»,
 // но гасить строки сразу — то, чего ждёшь от клика по плитке.
+
+// --- виртуальный скроллер --------------------------------------------------
+// При больших view рендерим только видимые строки + VIRT_BUF с каждой стороны.
+// Полный список (все div-ы в DOM) при 8k+ строк вешает браузер на несколько секунд;
+// виртуализация держит DOM в пределах ~150 узлов независимо от размера файла.
+const VIRT_THRESH = 200;   // ниже — прямой рендер (без оверхеда виртуализации)
+const VIRT_BUF   = 30;     // строк-буфер сверху и снизу от вьюпорта
+let _rowH = 28;            // оценка высоты строки px; уточняется после первого рендера
+let _virtActive = false;   // true пока активен виртуальный скроллер
+let _scrollRaf  = null;    // guard для rAF — один перерисов за кадр
+
+function _makeStreamRow(rec, i) {
+  const lvl = levelOf(rec);
+  const row = document.createElement("div");
+  row.className = "stream-row" + (lvl ? " lvl-" + lvl : "") + (i === state.selected ? " selected" : "");
+  row.dataset.idx = i;
+  const cell = (cls, txt) => { const s = document.createElement("span"); s.className = cls; s.textContent = txt; return s; };
+  const src = sourceOf(rec);
+  row.appendChild(cell("r-n", i + 1));
+  row.appendChild(cell("r-ts", tsOf(rec) || "—"));
+  row.appendChild(cell("r-lvl " + lvl, lvl || "—"));
+  row.appendChild(cell("r-src" + (src ? "" : " empty"), src || "—"));
+  row.appendChild(msgCell(rec));
+  row.addEventListener("click", () => selectRow(i));
+  return row;
+}
+
+function _virtPaint() {
+  _scrollRaf = null;
+  const box = $("stream");
+  const rows = $("v-rows");
+  if (!rows) return;
+  const n = state.view.length;
+  const viewH = box.clientHeight;
+  const top   = box.scrollTop;
+
+  const first = Math.max(0, Math.floor(top / _rowH) - VIRT_BUF);
+  const last  = Math.min(n - 1, Math.ceil((top + viewH) / _rowH) + VIRT_BUF);
+
+  $("v-top").style.height = (first * _rowH) + "px";
+  $("v-bot").style.height = (Math.max(0, n - 1 - last) * _rowH) + "px";
+
+  rows.textContent = "";  // быстрее innerHTML="" для DOM-узлов
+  const frag = document.createDocumentFragment();
+  for (let i = first; i <= last; i++) frag.appendChild(_makeStreamRow(state.view[i], i));
+  rows.appendChild(frag);
+
+  // уточняем высоту строки по первому реально отрисованному элементу
+  const sample = rows.firstElementChild;
+  if (sample && sample.offsetHeight > 0) _rowH = sample.offsetHeight;
+}
+
 function hiddenLevels() {
   const off = new Set();
   document.querySelectorAll(".lvl").forEach((c) => { if (!c.checked) off.add(c.value); });
@@ -403,12 +455,16 @@ function emptyState(title, hint) {
 
 function renderStream() {
   const box = $("stream");
+  box.onscroll = null;
+  _virtActive = false;
   box.innerHTML = "";
+
   // счётчик потока: видно из окна (если клиентский фильтр сузил — показываем оба числа)
   const visible = state.view.length, win = state.records.length;
   $("t-shown").textContent = visible === win
     ? `${ru(win)} / ${ru(state.totalLines || win)} строк`
     : `${ru(visible)} из ${ru(win)} в окне`;
+
   if (state.records.length === 0) {
     const entry = activeEntry();
     const body = !entry ? emptyState("Здесь появится поток логов", "Добавьте файлы в сессию, затем «Парсить».")
@@ -422,22 +478,24 @@ function renderStream() {
     box.innerHTML = `<div class="stream-empty">${emptyState("Ничего не найдено", "Смягчите фильтр или измените запрос.")}</div>`;
     return;
   }
+
+  if (state.view.length > VIRT_THRESH) {
+    // Виртуальный скроллер: три зоны — верхний спейсер, видимые строки, нижний спейсер.
+    _virtActive = true;
+    box.scrollTop = 0;
+    box.insertAdjacentHTML("afterbegin",
+      '<div id="v-top"></div><div id="v-rows"></div><div id="v-bot"></div>');
+    box.onscroll = () => {
+      if (_scrollRaf) return;
+      _scrollRaf = requestAnimationFrame(_virtPaint);
+    };
+    _virtPaint();
+    return;
+  }
+
+  // Прямой рендер для небольших списков
   const frag = document.createDocumentFragment();
-  state.view.forEach((rec, i) => {
-    const lvl = levelOf(rec);
-    const row = document.createElement("div");
-    row.className = "stream-row" + (lvl ? " lvl-" + lvl : "") + (i === state.selected ? " selected" : "");
-    row.dataset.idx = i;
-    const cell = (cls, txt) => { const s = document.createElement("span"); s.className = cls; s.textContent = txt; return s; };
-    const src = sourceOf(rec);
-    row.appendChild(cell("r-n", i + 1));
-    row.appendChild(cell("r-ts", tsOf(rec) || "—"));
-    row.appendChild(cell("r-lvl " + lvl, lvl || "—"));
-    row.appendChild(cell("r-src" + (src ? "" : " empty"), src || "—"));
-    row.appendChild(msgCell(rec));
-    row.addEventListener("click", () => selectRow(i));
-    frag.appendChild(row);
-  });
+  state.view.forEach((rec, i) => frag.appendChild(_makeStreamRow(rec, i)));
   box.appendChild(frag);
 }
 
@@ -511,12 +569,26 @@ function summaryHtml(rec) {
 // Перекраска выделения без перестроения списка (дёшево при клике/стрелках —
 // убирает джанк скролла полного ре-рендера).
 function paintSelection() {
-  $("stream").querySelectorAll(".stream-row").forEach((el) =>
+  const root = _virtActive ? $("v-rows") : $("stream");
+  if (!root) return;
+  root.querySelectorAll(".stream-row").forEach((el) =>
     el.classList.toggle("selected", Number(el.dataset.idx) === state.selected));
 }
 
 function scrollToSelected() {
   if (state.selected < 0) return;
+  if (_virtActive) {
+    const box = $("stream");
+    const targetTop = state.selected * _rowH;
+    const targetBot = targetTop + _rowH;
+    // Скроллим только если строка вне видимой зоны
+    if (targetTop < box.scrollTop || targetBot > box.scrollTop + box.clientHeight) {
+      box.scrollTop = Math.max(0, targetTop - box.clientHeight / 2);
+    }
+    // Перерисовываем виртуальное окно немедленно (без ожидания события scroll)
+    _virtPaint();
+    return;
+  }
   const el = $("stream").querySelector(`.stream-row[data-idx="${state.selected}"]`);
   if (el) el.scrollIntoView({ block: "nearest" });
 }
