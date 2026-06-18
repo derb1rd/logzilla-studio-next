@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import gzip
 import json
+from datetime import datetime, timezone
 
+from . import __version__
 from .contract import ExportOptions
 
 
@@ -21,18 +23,27 @@ def _dumps(obj, **kw) -> str:
         return json.dumps(obj, ensure_ascii=True, **kw)
 
 
+def _meta() -> dict:
+    return {
+        "logzilla_version": __version__,
+        "exported_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
 def export(records: list[dict], opts: ExportOptions) -> tuple[bytes, str, str]:
     """Сериализует записи в JSON. Возвращает (payload, mime, filename_suffix).
 
-    ndjson: по объекту на строку (NDJSON/JSON Lines) — каждую запись видно
-    отдельной строкой, удобнее грепать/диффать, чем один отступованный массив.
+    ndjson: первой строкой — мета-объект с версией, далее по объекту на строку.
+    json:   обёртка {"_logzilla": {...}, "records": [...]} — валидный JSON с мета.
     """
     if opts.ndjson:
-        text = "\n".join(_dumps(rec) for rec in records)
-        payload = (text + "\n").encode("utf-8")
+        lines = [_dumps({"_logzilla": _meta()})]
+        lines += [_dumps(rec) for rec in records]
+        payload = ("\n".join(lines) + "\n").encode("utf-8")
         mime, ext = "application/x-ndjson", "ndjson"
     else:
-        payload = (_dumps(records, indent=2) + "\n").encode("utf-8")
+        out = {"_logzilla": _meta(), "records": records}
+        payload = (_dumps(out, indent=2) + "\n").encode("utf-8")
         mime, ext = "application/json", "json"
     if opts.gzip:
         payload = gzip.compress(payload)
