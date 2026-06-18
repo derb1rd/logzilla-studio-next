@@ -774,7 +774,7 @@ async function doExport() {
   if ($("exportScope").value === "all") return doExportAll();
   const entry = activeEntry();
   if (!entry || !entry.request) { setFooter("Сначала выполните парсинг."); return; }
-  const req = { version: "1", parse_request: entry.request, options: { ndjson: $("ndjson").checked } };
+  const req = { version: "1", parse_request: entry.request, options: { ndjson: $("ndjson").checked, flatten: $("flatten").checked } };
   obs.action("export_clicked", { ndjson: req.options.ndjson, file: entry.name });
   setFooter("Экспорт…");
   try {
@@ -811,6 +811,7 @@ async function doExportAll() {
   const parsed = state.session.files.filter((f) => f.request && f.status === "parsed");
   if (!parsed.length) { setFooter("Нет распарсенных файлов для экспорта."); return; }
   const ndjson = $("ndjson").checked;
+  const flatten = $("flatten").checked;
   const ext = ndjson ? "ndjson" : "json";
   obs.action("export_all_clicked", { files: parsed.length, ndjson });
   setFooter(`Экспорт файлов… (0/${parsed.length})`);
@@ -821,7 +822,7 @@ async function doExportAll() {
   let truncatedAny = false;
   for (let k = 0; k < parsed.length; k++) {
     const f = parsed[k];
-    const req = { version: "1", parse_request: f.request, options: { ndjson } };
+    const req = { version: "1", parse_request: f.request, options: { ndjson, flatten } };
     try {
       const r = await obs.fetch("/api/export", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req),
@@ -879,7 +880,7 @@ function exportTs() {
 
 // --- prefs (localStorage) ---------------------------------------------------
 const PREFS_KEY = "logzilla-studio-next.prefs.v1";
-const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "product_filter", "ndjson"];
+const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "product_filter", "ndjson", "flatten"];
 
 function savePrefs() {
   const prefs = {

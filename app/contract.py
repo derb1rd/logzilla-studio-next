@@ -247,6 +247,7 @@ class ParseResult:
 class ExportOptions:
     gzip: bool = False
     ndjson: bool = False   # по объекту на строку (грепается/диффается лучше массива)
+    flatten: bool = False  # вложенные объекты → плоские поля через точку
 
     @classmethod
     def from_dict(cls, d: Any) -> "ExportOptions":
@@ -254,6 +255,7 @@ class ExportOptions:
         return cls(
             gzip=_as_bool(d.get("gzip"), "export.options.gzip", False),
             ndjson=_as_bool(d.get("ndjson"), "export.options.ndjson", False),
+            flatten=_as_bool(d.get("flatten"), "export.options.flatten", False),
         )
 
 

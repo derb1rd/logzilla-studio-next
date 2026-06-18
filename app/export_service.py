@@ -23,6 +23,18 @@ def _dumps(obj, **kw) -> str:
         return json.dumps(obj, ensure_ascii=True, **kw)
 
 
+def _flatten(record: dict, prefix: str = "", sep: str = ".") -> dict:
+    """Рекурсивно разворачивает вложенные dict в плоские поля через точку."""
+    out: dict = {}
+    for k, v in record.items():
+        key = f"{prefix}{sep}{k}" if prefix else k
+        if isinstance(v, dict):
+            out.update(_flatten(v, key, sep))
+        else:
+            out[key] = v
+    return out
+
+
 def _meta() -> dict:
     return {
         "logzilla_version": __version__,
@@ -36,6 +48,9 @@ def export(records: list[dict], opts: ExportOptions) -> tuple[bytes, str, str]:
     ndjson: первой строкой — мета-объект с версией, далее по объекту на строку.
     json:   обёртка {"_logzilla": {...}, "records": [...]} — валидный JSON с мета.
     """
+    if opts.flatten:
+        records = [_flatten(r) for r in records]
+
     if opts.ndjson:
         lines = [_dumps({"_logzilla": _meta()})]
         lines += [_dumps(rec) for rec in records]
