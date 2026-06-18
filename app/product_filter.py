@@ -28,8 +28,8 @@ PRODUCT_FIELDS: frozenset[str] = frozenset({
     "ticket_id", "request_id", "id_transfer", "service_id",
     "object_type", "object_code", "object_name", "object_id",
     "doc_type", "doc_type_1c", "doc_id", "doc_date", "is_incoming",
-    # Статус / аудит (status не включаем — в реальных логах это HTTP-статус из middleware)
-    "action", "severity", "delegate", "labels", "resource",
+    # Статус / аудит
+    "action", "severity", "delegate", "labels", "resource", "status",
     # Лог-записи продукта
     "text", "recommendation", "comment", "created_at",
     "request_date", "response_date", "transfer_date", "erdat",
