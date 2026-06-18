@@ -933,7 +933,11 @@ function wireUp() {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("search").focus(); return; }
     const tag = (document.activeElement?.tagName || "").toUpperCase();
     const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-    if (e.key === "Escape" && tag === "INPUT") { e.target.blur(); return; }
+    if (e.key === "Escape" && tag === "INPUT") {
+      if (e.target.id === "search") { e.preventDefault(); e.target.value = ""; applySearch(); }
+      e.target.blur();
+      return;
+    }
     if (e.key === "Escape" && state.selectedRec) { closeInspector(); return; }
     if (typing) return;                         // не мешаем вводу
     if (e.key === "ArrowDown") { e.preventDefault(); moveSelection(1); }
