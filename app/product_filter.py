@@ -51,9 +51,20 @@ ALL_INFRASTRUCTURE: frozenset[str] = frozenset().union(
     _BASE_LOG, _OBSERVABILITY, _HTTP_MIDDLEWARE, _SQL, _NGINX,
 )
 
+# Якорные поля — всегда остаются, чтобы разные записи можно было различить.
+# Технически инфраструктурные, но без них записи с одинаковыми продуктовыми
+# полями неразличимы: непонятно когда произошло и что это за событие.
+_ANCHOR: frozenset[str] = frozenset({
+    "time", "ts", "timestamp",  # когда
+    "level", "levelname",       # серьёзность
+    "msg", "message",           # что произошло
+})
+
+_BLOCKED: frozenset[str] = ALL_INFRASTRUCTURE - _ANCHOR
+
 
 def _filter_one(record: dict) -> dict:
-    return {k: v for k, v in record.items() if k.lower() not in ALL_INFRASTRUCTURE}
+    return {k: v for k, v in record.items() if k.lower() not in _BLOCKED}
 
 
 def filter_records(data: Any) -> Any:
