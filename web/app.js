@@ -81,13 +81,15 @@ async function checkHealth() {
 
 // --- сбор ParseOptions (глобальные для всей сессии) -------------------------
 function collectOptions() {
-  const levels = [...document.querySelectorAll(".lvl:checked")].map((c) => c.value);
-  const allLevels = document.querySelectorAll(".lvl").length;
+  // OTHER — клиентская категория, сервер её не знает; отправляем только реальные уровни.
+  const SERVER_LEVELS = new Set(["ERROR", "WARN", "INFO", "DEBUG"]);
+  const serverCbs = [...document.querySelectorAll(".lvl")].filter((c) => SERVER_LEVELS.has(c.value));
+  const checkedServer = serverCbs.filter((c) => c.checked);
   return {
     // Источник всегда inline (текст уже раскодирован в браузере), поэтому серверу
     // кодировка не нужна; «авто» отдаём как utf-8, чтобы не упереться в enum контракта.
     encoding: $("encoding").value === "auto" ? "utf-8" : $("encoding").value,
-    log_levels: levels.length === allLevels ? [] : levels,
+    log_levels: checkedServer.length === serverCbs.length ? [] : checkedServer.map((c) => c.value),
     remove_duplicates: $("remove_duplicates").checked,
     remove_ansi: $("remove_ansi").checked,
     expand_message: $("expand_message").checked,
@@ -315,6 +317,7 @@ function renderActive() {
     $("t-format").textContent = entry && entry.status === "error" ? "ошибка" : "—";
     $("t-err").textContent = "—"; $("t-warn").textContent = "—"; $("t-duration").textContent = "";
     updateLevelCounts();
+    renderSourcePanel();
     applySearch();
     return;
   }
@@ -326,6 +329,7 @@ function renderActive() {
   $("t-warn").textContent = ru(m.warnings);
   $("t-duration").textContent = formatDuration(m.duration_ms);
   updateLevelCounts();
+  renderSourcePanel();
 
   const pw = (entry.result && entry.result.preview_window) || {};
   let note = "";
@@ -336,10 +340,59 @@ function renderActive() {
   if (note) setFooter(`${entry.name}: ${ru(m.filtered)} записей${note}`);
 }
 
-function updateLevelCounts() {
-  const counts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0 };
+function renderSourcePanel() {
+  const container = $("srcFilters");
+  if (!container) return;
+
+  // Собираем уникальные источники с подсчётом
+  const srcCounts = new Map();
   for (const rec of state.records) {
-    const lvl = levelOf(rec);
+    const src = sourceOf(rec);
+    srcCounts.set(src, (srcCounts.get(src) || 0) + 1);
+  }
+
+  if (srcCounts.size === 0) {
+    container.innerHTML = '<span class="src-hint">появятся после парсинга</span>';
+    return;
+  }
+
+  // Сохраняем предыдущий выбор (чтобы не сбрасывать при переключении файлов)
+  const prevOff = new Set();
+  container.querySelectorAll(".src-cb").forEach((c) => { if (!c.checked) prevOff.add(c.value); });
+
+  // Сортируем: по убыванию числа записей, потом алфавитно
+  const sorted = [...srcCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+
+  container.innerHTML = "";
+  for (const [src, cnt] of sorted) {
+    const label = document.createElement("label");
+    label.className = "src-tile" + (prevOff.has(src) ? " off" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "src-cb";
+    cb.value = src;
+    cb.checked = !prevOff.has(src);
+    label.appendChild(cb);
+    const nameEl = document.createElement("span");
+    nameEl.className = "src-name";
+    nameEl.textContent = src || "?";
+    label.appendChild(nameEl);
+    const cntEl = document.createElement("span");
+    cntEl.className = "src-count";
+    cntEl.textContent = ru(cnt);
+    label.appendChild(cntEl);
+    cb.addEventListener("change", () => {
+      label.classList.toggle("off", !cb.checked);
+      applySearch();
+    });
+    container.appendChild(label);
+  }
+}
+
+function updateLevelCounts() {
+  const counts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, OTHER: 0 };
+  for (const rec of state.records) {
+    const lvl = levelOf(rec) || "OTHER";
     if (lvl in counts) counts[lvl]++;
   }
   for (const lvl of Object.keys(counts)) $("cnt-" + lvl).textContent = ru(counts[lvl]);
@@ -376,15 +429,16 @@ let _scrollRaf  = null;    // guard для rAF — один перерисов �
 
 function _makeStreamRow(rec, i) {
   const lvl = levelOf(rec);
+  const effectiveLvl = lvl || "OTHER";
   const row = document.createElement("div");
-  row.className = "stream-row" + (lvl ? " lvl-" + lvl : "") + (i === state.selected ? " selected" : "");
+  row.className = "stream-row lvl-" + effectiveLvl + (i === state.selected ? " selected" : "");
   row.dataset.idx = i;
   const cell = (cls, txt) => { const s = document.createElement("span"); s.className = cls; s.textContent = txt; return s; };
   const src = sourceOf(rec);
   row.appendChild(cell("r-n", i + 1));
   row.appendChild(cell("r-ts", tsOf(rec) || "—"));
-  row.appendChild(cell("r-lvl " + lvl, lvl || "—"));
-  row.appendChild(cell("r-src" + (src ? "" : " empty"), src || "—"));
+  row.appendChild(cell("r-lvl " + effectiveLvl, effectiveLvl));
+  row.appendChild(cell("r-src" + (src ? "" : " empty"), src || "?"));
   row.appendChild(msgCell(rec));
   row.addEventListener("click", () => selectRow(i));
   return row;
@@ -421,14 +475,22 @@ function hiddenLevels() {
   return off;
 }
 
+function hiddenSources() {
+  const off = new Set();
+  document.querySelectorAll(".src-cb").forEach((c) => { if (!c.checked) off.add(c.value); });
+  return off;
+}
+
 function applySearch() {
   const q = buildQuery($("search").value);
   state.queryTerms = q.text;                      // термины для подсветки в строках
   const noQuery = isEmptyQuery(q);
   const off = hiddenLevels();
+  const offSrc = hiddenSources();
   state.view = state.records.filter((rec) => {
-    const lvl = levelOf(rec);
-    if (lvl && off.has(lvl)) return false;        // плитка уровня выключена
+    const effectiveLvl = levelOf(rec) || "OTHER";
+    if (off.has(effectiveLvl)) return false;      // плитка уровня выключена
+    if (offSrc.size > 0 && offSrc.has(sourceOf(rec))) return false;  // плитка источника выключена
     return noQuery || matchesQuery(rec, q);
   });
   // Выбор хранится по идентичности записи (state.selectedRec), а индекс в потоке
@@ -672,7 +734,7 @@ function renderInspector() {
     body.innerHTML = "";
     return;
   }
-  const lvl = levelOf(rec) || "DEBUG";
+  const lvl = levelOf(rec) || "OTHER";
   const ri = state.records.indexOf(rec);
   const rid = reqIdOf(rec);
   const hidden = state.selected < 0
@@ -810,7 +872,7 @@ function contextHtml() {
     html += `<div class="ctx-row${multi ? " xfile" : ""}${center}" data-fid="${fileId}" data-ri="${i}">` +
       `<span class="c-n">${i + 1}</span>` +
       fileBadge +
-      `<span class="r-lvl ${levelOf(rec)}">${levelOf(rec) || "—"}</span>` +
+      `<span class="r-lvl ${levelOf(rec) || "OTHER"}">${levelOf(rec) || "OTHER"}</span>` +
       `<span>${summaryHtml(rec)}</span></div>`;
   }
   return html;
@@ -820,11 +882,11 @@ function contextHtml() {
 function histoHtml() {
   const n = state.records.length;
   if (n === 0) return "";
-  const lvl = levelOf(state.selectedRec);
+  const lvl = levelOf(state.selectedRec) || "OTHER";
   const BINS = 20;
   const bins = new Array(BINS).fill(0);
   state.records.forEach((rec, i) => {
-    if (levelOf(rec) === lvl) bins[Math.min(BINS - 1, Math.floor((i / n) * BINS))]++;
+    if ((levelOf(rec) || "OTHER") === lvl) bins[Math.min(BINS - 1, Math.floor((i / n) * BINS))]++;
   });
   const max = Math.max(1, ...bins);
   // позиция выбранной записи в исходном окне
@@ -835,7 +897,7 @@ function histoHtml() {
     `<div class="histo-bar" style="height:${(v / max) * 100}%;background:${i === selBin ? "var(--accent)" : color};opacity:${i === selBin ? 1 : 0.5}"></div>`
   ).join("");
   return `<div class="histo">` +
-    `<div class="histo-label">Уровень ${lvl || "?"} по окну · всего ${ru(bins.reduce((a, b) => a + b, 0))}</div>` +
+    `<div class="histo-label">Уровень ${lvl} по окну · всего ${ru(bins.reduce((a, b) => a + b, 0))}</div>` +
     `<div class="histo-bars">${bars}</div>` +
     `<div class="histo-axis"><span>начало</span><span>здесь</span><span>конец</span></div></div>`;
 }
