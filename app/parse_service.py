@@ -21,6 +21,7 @@ from uuid import uuid4
 from logZilla3000 import UniversalLogParser  # ядро (через bootstrap в app/__init__.py)
 from logZilla3000.detectors import FormatDetector
 
+from .product_filter import filter_records as _product_filter
 from .contract import (
     MAX_RECORDS,
     CONTRACT_VERSION,
@@ -219,6 +220,8 @@ def _run(req: ParseRequest) -> _Run:
     else:
         result = parser.parse(raw)
     records = _normalize(result)
+    if req.options.product_filter:
+        records = _product_filter(records)
 
     total = len(records)
     truncated = False

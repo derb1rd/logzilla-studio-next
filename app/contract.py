@@ -76,6 +76,7 @@ class ParseOptions:
     compact_json: bool = False  # → indent=None
     format_sql: bool = True
     strip_k8s: bool = False
+    product_filter: bool = False  # фильтр продуктовых полей VK Tax Compliance
 
     @classmethod
     def from_dict(cls, d: Any) -> "ParseOptions":
@@ -92,6 +93,7 @@ class ParseOptions:
             compact_json=_as_bool(d.get("compact_json"), "options.compact_json", False),
             format_sql=_as_bool(d.get("format_sql"), "options.format_sql", True),
             strip_k8s=_as_bool(d.get("strip_k8s"), "options.strip_k8s", False),
+            product_filter=_as_bool(d.get("product_filter"), "options.product_filter", False),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -104,6 +106,7 @@ class ParseOptions:
             "compact_json": self.compact_json,
             "format_sql": self.format_sql,
             "strip_k8s": self.strip_k8s,
+            "product_filter": self.product_filter,
         }
 
 
