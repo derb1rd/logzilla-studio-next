@@ -92,7 +92,6 @@ function collectOptions() {
     remove_ansi: $("remove_ansi").checked,
     expand_message: $("expand_message").checked,
     strip_k8s: $("strip_k8s").checked,
-    product_filter: $("product_filter").checked,
     compact_json: $("compact_json").checked,
     format_sql: true,
   };
@@ -880,7 +879,7 @@ function exportTs() {
 
 // --- prefs (localStorage) ---------------------------------------------------
 const PREFS_KEY = "logzilla-studio-next.prefs.v1";
-const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "product_filter", "ndjson", "flatten"];
+const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "ndjson", "flatten"];
 
 function savePrefs() {
   const prefs = {
