@@ -1,7 +1,8 @@
 """Фильтр продуктовых полей VK Tax Compliance / Taxmonitor.
 
-Принцип: белый список — пропускаем ТОЛЬКО поля из каталога продукта.
-Всё остальное (инфраструктура, неизвестные поля) отбрасывается.
+Принцип: блок-лист — удаляем гарантированно инфраструктурные поля
+(zerolog, K8s, HTTP-middleware, nginx, SQL-логгер). Всё остальное остаётся.
+Записи, из которых после фильтра ничего не осталось, исключаются.
 
 Источник каталога: taxcompliance_field_catalog.json (analysed 2026-06-18).
 """
@@ -10,59 +11,62 @@ from __future__ import annotations
 
 from typing import Any
 
-# Каталог продуктовых полей taxmon/taxcompliance.
-PRODUCT_FIELDS: frozenset[str] = frozenset({
-    # Пользователь / субъект
-    "user", "user_id", "userid", "user_login", "user_ip", "userip",
-    "login", "firstname", "middlename", "lastname", "groupid",
-    "ernam", "subject",
-    # Организация / налогоплательщик
-    "org_unit", "org_unit_name", "taxpayer", "inn", "kpp", "oktmo",
-    "ifns", "fts", "tax_inspection_code", "tax_authority_code",
-    "tax_authority", "fts_name", "source_system",
-    # Налоговый пакет / отчёт
-    "tax_pack", "tax_pack_name", "taxform", "tax_type",
-    "tax_period", "tax_period_name", "period", "fiscal_year",
-    "corr_num", "correction_number", "version_reg",
-    # Запрос / документ
-    "ticket_id", "request_id", "id_transfer", "service_id",
-    "object_type", "object_code", "object_name", "object_id",
-    "doc_type", "doc_type_1c", "doc_id", "doc_date", "is_incoming",
-    # Статус / аудит
-    "action", "severity", "delegate", "labels", "resource", "status",
-    # Лог-записи продукта
-    "text", "recommendation", "comment", "created_at",
-    "request_date", "response_date", "transfer_date", "erdat",
-    # Мета-поля передачи (1C Connector)
-    "transfer_taxforms", "taxform_rows_total", "taxform_batch_number",
-    "taxform_batches_total", "taxform_batch_rows",
-    # XML / файлы
-    "xml_income_file", "xml_outcome_file", "file_name", "file_path",
-    # Прочие продуктовые
-    "description", "backtrace", "step", "process", "jwe_key_path",
-    "requestid", "auditinfo",
-    # Message / данные
-    "message", "data", "payload", "body", "result",
-    "error", "error_code", "error_message",
-    "service", "stage_fields", "catalog_fields", "col_config",
+_BASE_LOG: frozenset[str] = frozenset({
+    "time", "ts", "level", "msg", "caller",
+    "asctime", "created", "msecs", "relativecreated",
+    "levelno", "levelname", "name", "module", "funcname", "lineno",
+    "thread", "threadname", "process", "processname", "pathname", "filename",
+    "logger_name", "thread_id", "thread_priority", "source_class", "source_method",
 })
+
+_OBSERVABILITY: frozenset[str] = frozenset({
+    "category", "zone", "node", "service_name", "app",
+    "service_instance", "service_version", "namespace",
+    "trace_id", "span_id", "traceparent", "tracestate", "b3_traceid",
+    "sentry_id",
+})
+
+_HTTP_MIDDLEWARE: frozenset[str] = frozenset({
+    "req_id", "reqid", "method", "httpmethod",
+    "url", "path", "remote_addr", "remoteaddr", "host",
+    "status", "httpstatus", "request_time", "duration", "elapsed",
+    "grpcfunction", "grpcerror", "grpc_method", "grpc_service", "grpc_code",
+    "metadata", "user_agent", "referer", "protocol",
+    "request_length", "response_length", "content_type",
+})
+
+_SQL: frozenset[str] = frozenset({
+    "sql", "args", "rowcount", "rows_affected",
+})
+
+_NGINX: frozenset[str] = frozenset({
+    "remote_user", "body_bytes_sent", "http_referer", "http_user_agent",
+    "upstream_addr", "upstream_status", "upstream_response_time",
+    "upstream_response_length", "proxy_upstream_name", "upstream_addr_resolved",
+    "request_uri", "time_local", "connection_id", "server",
+    "loki_ts", "error_level", "pid", "tid", "error_message", "error_time",
+})
+
+ALL_INFRASTRUCTURE: frozenset[str] = frozenset().union(
+    _BASE_LOG, _OBSERVABILITY, _HTTP_MIDDLEWARE, _SQL, _NGINX,
+)
 
 
 def _filter_one(record: dict) -> dict:
-    return {k: v for k, v in record.items() if k.lower() in PRODUCT_FIELDS}
+    return {k: v for k, v in record.items() if k.lower() not in ALL_INFRASTRUCTURE}
 
 
 def filter_records(data: Any) -> Any:
-    """Рекурсивно оставляет только продуктовые поля из dict/list.
+    """Рекурсивно удаляет инфраструктурные поля из dict/list.
 
-    Записи без продуктовых полей (чистая инфраструктура) из списка исключаются.
+    Записи, из которых после фильтра ничего не осталось, исключаются.
     """
     if isinstance(data, list):
         result = []
         for item in data:
             filtered = filter_records(item)
             if isinstance(filtered, dict) and not filtered:
-                continue  # запись стала пустой — нет продуктовых полей, дропаем
+                continue
             result.append(filtered)
         return result
     if isinstance(data, dict):
