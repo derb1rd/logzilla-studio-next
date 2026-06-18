@@ -928,17 +928,24 @@ function wireUp() {
     obs.action("search", { len: e.target.value.length });
     applySearch();
   });
+  // Safari и некоторые Chrome-версии бросают "search" (а не "input") при клике на × кнопку.
+  $("search").addEventListener("search", () => applySearch());
   // хоткеи: ⌘K — поиск; ↑/↓ — навигация по потоку; Esc — снять выбор/выйти из поиска.
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("search").focus(); return; }
     const tag = (document.activeElement?.tagName || "").toUpperCase();
     const typing = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-    if (e.key === "Escape" && tag === "INPUT") {
-      if (e.target.id === "search") { e.preventDefault(); e.target.value = ""; applySearch(); }
-      e.target.blur();
+    if (e.key === "Escape") {
+      if (tag === "INPUT") {
+        if (e.target.id === "search") { e.preventDefault(); e.target.value = ""; applySearch(); }
+        e.target.blur();
+        return;
+      }
+      // Escape вне поля ввода: закрываем инспектор и сбрасываем поиск (напр. после pivotToReq)
+      if (state.selectedRec) closeInspector();
+      if ($("search").value) { $("search").value = ""; applySearch(); }
       return;
     }
-    if (e.key === "Escape" && state.selectedRec) { closeInspector(); return; }
     if (typing) return;                         // не мешаем вводу
     if (e.key === "ArrowDown") { e.preventDefault(); moveSelection(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); moveSelection(-1); }

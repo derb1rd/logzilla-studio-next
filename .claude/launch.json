@@ -4,8 +4,8 @@
     {
       "name": "studio-next",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "app.server", "--port", "8799"],
-      "port": 8799
+      "runtimeArgs": ["-m", "app.server", "--port", "8795"],
+      "port": 8795
     }
   ]
 }
