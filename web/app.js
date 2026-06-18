@@ -282,13 +282,23 @@ async function doParse() {
 
   obs.action("parse_clicked", { files: files.length, levels: collectOptions().log_levels });
   $("parseBtn").disabled = true;
-  setFooter(`Парсинг… (${files.length} файл(ов))`);
+  $("parseBtn").classList.add("loading");
+  showProgress(0);
+  setFooter(`Парсинг… (0/${files.length})`);
   // Записи устаревают: их объекты пересоздаются прогоном.
   state.selectedRec = null; state.selected = -1; state.contextAnchor = null;
+  let _parseDone = 0;
   try {
-    await runPool(files, 3, parseEntry);
+    await runPool(files, 3, async (entry) => {
+      await parseEntry(entry);
+      _parseDone++;
+      showProgress((_parseDone / files.length) * 100);
+      setFooter(`Парсинг… (${_parseDone}/${files.length})`);
+    });
   } finally {
     $("parseBtn").disabled = false;
+    $("parseBtn").classList.remove("loading");
+    hideProgress();
   }
   renderActive();
   const ok = files.filter((f) => f.status === "parsed").length;
@@ -909,6 +919,9 @@ async function doExport() {
   if (!entry || !entry.request) { setFooter("Сначала выполните парсинг."); return; }
   const req = { version: "1", parse_request: entry.request, options: { ndjson: $("ndjson").checked, flatten: $("flatten").checked } };
   obs.action("export_clicked", { ndjson: req.options.ndjson, file: entry.name });
+  $("exportBtn").disabled = true;
+  $("exportBtn").classList.add("loading");
+  showProgress(null);
   setFooter("Экспорт…");
   try {
     const r = await obs.fetch("/api/export", {
@@ -933,6 +946,10 @@ async function doExport() {
     }
   } catch (e) {
     setFooter("Сетевая ошибка экспорта: " + e.message);
+  } finally {
+    $("exportBtn").disabled = false;
+    $("exportBtn").classList.remove("loading");
+    hideProgress();
   }
 }
 
@@ -947,34 +964,44 @@ async function doExportAll() {
   const flatten = $("flatten").checked;
   const ext = ndjson ? "ndjson" : "json";
   obs.action("export_all_clicked", { files: parsed.length, ndjson });
+  $("exportBtn").disabled = true;
+  $("exportBtn").classList.add("loading");
+  showProgress(0);
   setFooter(`Экспорт файлов… (0/${parsed.length})`);
 
   const ts = exportTs();
   const nameCounts = new Map();
   const failures = [];
   let truncatedAny = false;
-  for (let k = 0; k < parsed.length; k++) {
-    const f = parsed[k];
-    const req = { version: "1", parse_request: f.request, options: { ndjson, flatten } };
-    try {
-      const r = await obs.fetch("/api/export", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req),
-      });
-      if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j.error?.message || r.status);
+  try {
+    for (let k = 0; k < parsed.length; k++) {
+      const f = parsed[k];
+      const req = { version: "1", parse_request: f.request, options: { ndjson, flatten } };
+      try {
+        const r = await obs.fetch("/api/export", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req),
+        });
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          throw new Error(j.error?.message || r.status);
+        }
+        if (r.headers.get("X-Truncated") === "true") truncatedAny = true;
+        const base = baseName(f.name);
+        const n = (nameCounts.get(base) || 0) + 1;
+        nameCounts.set(base, n);
+        const fname = n > 1 ? `${base}_${ts}_${n}.${ext}` : `${base}_${ts}.${ext}`;
+        downloadBlob(await r.blob(), fname);
+        setFooter(`Экспорт файлов… (${k + 1}/${parsed.length})`);
+        showProgress(((k + 1) / parsed.length) * 100);
+      } catch (e) {
+        failures.push(`${f.name}: ${e.message}`);
       }
-      if (r.headers.get("X-Truncated") === "true") truncatedAny = true;
-      const base = baseName(f.name);
-      const n = (nameCounts.get(base) || 0) + 1;
-      nameCounts.set(base, n);
-      const fname = n > 1 ? `${base}_${ts}_${n}.${ext}` : `${base}_${ts}.${ext}`;
-      downloadBlob(await r.blob(), fname);
-      setFooter(`Экспорт файлов… (${k + 1}/${parsed.length})`);
-    } catch (e) {
-      failures.push(`${f.name}: ${e.message}`);
+      if (k < parsed.length - 1) await sleep(250);   // дать браузеру принять загрузку
     }
-    if (k < parsed.length - 1) await sleep(250);   // дать браузеру принять загрузку
+  } finally {
+    $("exportBtn").disabled = false;
+    $("exportBtn").classList.remove("loading");
+    hideProgress();
   }
 
   const ok = parsed.length - failures.length;
@@ -1034,6 +1061,26 @@ function restorePrefs() {
     document.querySelectorAll(".lvl").forEach((c) => { if (saved.has(c.value)) c.checked = !!saved.get(c.value); });
   }
   for (const id of PREF_CHECKS) if (typeof prefs[id] === "boolean") $(id).checked = prefs[id];
+}
+
+// --- прогресс-бар -----------------------------------------------------------
+function showProgress(pct) {           // pct = 0-100 или null → неопределённый
+  const bar = $("progressBar");
+  const fill = $("progressFill");
+  bar.hidden = false;
+  if (pct == null) {
+    bar.classList.add("indeterminate");
+    fill.style.width = "";
+  } else {
+    bar.classList.remove("indeterminate");
+    fill.style.width = pct + "%";
+  }
+}
+function hideProgress() {
+  const bar = $("progressBar");
+  bar.classList.remove("indeterminate");
+  $("progressFill").style.width = "100%";
+  setTimeout(() => { bar.hidden = true; $("progressFill").style.width = "0%"; }, 350);
 }
 
 // --- обвязка ----------------------------------------------------------------
