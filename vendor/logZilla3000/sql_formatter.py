@@ -13,6 +13,7 @@ SQL-запросы содержали реальные переносы стро
 import json
 import re
 import logging
+from functools import lru_cache
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,10 @@ logger = logging.getLogger(__name__)
 # иначе лог заливается дублями и раздувается счётчик warnings парсинга.
 _sqlparse = None
 _sqlparse_missing = False
+
+# Порог длины SQL: очень длинные запросы дороги для sqlparse, а пользовательской
+# ценности от их форматирования мало. Строки сверх лимита возвращаются как есть.
+_MAX_SQL_LEN = 100_000
 
 # Ключи, в которых ожидается SQL-запрос
 SQL_KEYS = {"sql", "query", "statement", "query_text"}
@@ -51,6 +56,42 @@ def is_sql(value: str) -> bool:
     return bool(_SQL_START_PATTERN.match(value))
 
 
+@lru_cache(maxsize=1024)
+def _format_sql_cached(value: str) -> str:
+    """sqlparse-форматирование с кешем по точному содержимому запроса.
+
+    Одинаковые SQL-строки (один SELECT на тысячи записей) форматируются
+    ровно один раз — повторные вызовы возвращают закешированный результат
+    без обращения к sqlparse. maxsize=1024 покрывает типичный диапазон
+    уникальных запросов в одном файле (~100–500 уникальных SQL).
+    """
+    global _sqlparse, _sqlparse_missing
+    if _sqlparse_missing:
+        return value
+    if _sqlparse is None:
+        try:
+            import sqlparse as _sp
+            _sqlparse = _sp
+        except ImportError:
+            _sqlparse_missing = True
+            logger.warning(
+                "Библиотека sqlparse не установлена. "
+                "Установите: pip install sqlparse"
+            )
+            return value
+    try:
+        formatted = _sqlparse.format(
+            value,
+            reindent=True,
+            keyword_case="upper",
+            strip_whitespace=True,
+        )
+        return formatted.strip()
+    except Exception as exc:
+        logger.debug("Не удалось отформатировать SQL: %s", exc)
+        return value
+
+
 def format_sql(value: str) -> str:
     """
     Форматирует SQL-запрос с помощью sqlparse.
@@ -66,38 +107,11 @@ def format_sql(value: str) -> str:
     """
     if not isinstance(value, str):
         return value
-
+    if len(value) > _MAX_SQL_LEN:
+        return value
     if not is_sql(value):
         return value
-
-    global _sqlparse, _sqlparse_missing
-    if _sqlparse is None:
-        if _sqlparse_missing:
-            return value
-        try:
-            import sqlparse as _sp
-            _sqlparse = _sp
-        except ImportError:
-            _sqlparse_missing = True
-            logger.warning(
-                "Библиотека sqlparse не установлена. "
-                "Установите: pip install sqlparse"
-            )
-            return value
-
-    try:
-        formatted = _sqlparse.format(
-            value,
-            reindent=True,
-            keyword_case="upper",
-            strip_whitespace=True,
-        )
-        # Убираем лишние ведущие/концевые пробелы и переводы строк
-        formatted = formatted.strip()
-        return formatted
-    except Exception as exc:
-        logger.debug("Не удалось отформатировать SQL: %s", exc)
-        return value
+    return _format_sql_cached(value)
 
 
 def format_sql_fields(data: Any, enabled: bool = True) -> Any:
