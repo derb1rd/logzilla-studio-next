@@ -121,6 +121,112 @@ def test_csv_with_multiline_field_detected_and_preserved():
     assert all("json_snippet" not in r and "raw" not in r for r in res.records)
 
 
+def test_python_traceback_grouped_into_one_record():
+    """Полный Python traceback (с Flask-заголовком) должен давать 1 запись,
+    а не по записи на каждую строку. Поля type и message извлекаются из конца."""
+    tb = (
+        "[2026-05-12 05:47:01,957] ERROR in app: Exception on /api/xml-editor/v1/schema [PUT]\n"
+        "Traceback (most recent call last):\n"
+        "  File \"/opt/application/venv/lib/python3.12/site-packages/flask/app.py\", line 1823, in full_dispatch_request\n"
+        "    rv = self.dispatch_request()\n"
+        "  File \"/opt/application/venv/lib/python3.12/site-packages/audit_client/modules/mixins.py\", line 56, in build_request\n"
+        "    return AuditRequest()\n"
+        "TypeError: bad argument type for built-in operation"
+    )
+    res = parse(_inline(tb))
+    assert res.format_detected == "python_traceback"
+    assert len(res.records) == 1
+    rec = res.records[0]
+    assert rec.get("level") == "ERROR"
+    assert rec.get("type") == "TypeError"
+    assert rec.get("message") == "bad argument type for built-in operation"
+    assert rec.get("url") == "/api/xml-editor/v1/schema"
+    assert rec.get("method") == "PUT"
+    assert isinstance(rec.get("frames"), list) and len(rec["frames"]) >= 2
+    assert "traceback" in rec
+
+
+def test_python_traceback_without_header():
+    """Чистый traceback без Flask-заголовка — тоже 1 запись."""
+    tb = (
+        "Traceback (most recent call last):\n"
+        "  File \"/opt/application/venv/lib/python3.12/site-packages/audit_client/auditors/synchronous.py\", line 24, in __exit__\n"
+        "    self.write_logs(self.messages)\n"
+        "psycopg2.OperationalError: SSL connection has been closed unexpectedly"
+    )
+    res = parse(_inline(tb))
+    assert res.format_detected == "python_traceback"
+    assert len(res.records) == 1
+    rec = res.records[0]
+    assert rec.get("type") == "psycopg2.OperationalError"
+    assert "SSL connection" in rec.get("message", "")
+
+
+def test_go_goroutine_dump_grouped():
+    """Горутин-дамп Go (goroutine N [running]:) должен давать 1 запись с level=FATAL."""
+    dump = (
+        "goroutine 20928 [running]:\n"
+        "net/http.(*conn).serve.func1()\n"
+        "\t/usr/local/go/src/net/http/server.go:1947 +0xbe\n"
+        "panic({0x222f600?, 0x4959500?})\n"
+        "\t/usr/local/go/src/runtime/panic.go:792 +0x132\n"
+        "main.(*Server).handleRequest(0xc000b5a000)\n"
+        "\t/app/server.go:142 +0x3a8"
+    )
+    res = parse(_inline(dump))
+    assert res.format_detected == "go_panic"
+    assert len(res.records) == 1
+    rec = res.records[0]
+    assert rec.get("level") == "FATAL"
+    assert rec.get("goroutine") == 20928
+    assert "traceback" in rec
+
+
+def test_go_http_panic_extracts_message():
+    """'http: panic serving IP:port: runtime error:...' + горутин-дамп — 1 запись
+    с type=panic и message=сообщение об ошибке."""
+    dump = (
+        "2026/03/27 09:34:01 http: panic serving 10.100.13.180:34844: "
+        "runtime error: invalid memory address or nil pointer dereference\n"
+        "goroutine 11243 [running]:\n"
+        "net/http.(*conn).serve.func1()\n"
+        "\t/usr/local/go/src/net/http/server.go:1947 +0xbe"
+    )
+    res = parse(_inline(dump))
+    assert res.format_detected == "go_panic"
+    assert len(res.records) == 1
+    rec = res.records[0]
+    assert rec.get("type") == "panic"
+    assert "nil pointer dereference" in rec.get("message", "")
+
+
+def test_exception_group_grouped():
+    """ExceptionGroup / anyio TaskGroup должен давать 1 запись с sub_exceptions."""
+    eg = (
+        "ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)\n"
+        "  + Exception Group Traceback (most recent call last):\n"
+        "  |   File \"/opt/application/src/reasoned_opinion/core/engine.py\", line 54, in __init__\n"
+        "  |     self._parser = self._pg.build()\n"
+        "  | PermissionError: [Errno 13] Permission denied: '/home/reasop'\n"
+        "  +------------------------------------"
+    )
+    res = parse(_inline(eg))
+    assert res.format_detected == "exception_group"
+    assert len(res.records) == 1
+    rec = res.records[0]
+    assert rec.get("type") == "ExceptionGroup"
+    assert isinstance(rec.get("sub_exceptions"), list)
+    assert rec["sub_exceptions"][0]["type"] == "PermissionError"
+
+
+def test_single_exception_line_is_text_not_traceback():
+    """Единственная строка исключения без заголовка — просто text-сообщение, не traceback."""
+    res = parse(_inline("TypeError: bad argument type for built-in operation"))
+    assert res.format_detected != "python_traceback"
+    assert len(res.records) == 1
+    assert res.records[0].get("message") == "TypeError: bad argument type for built-in operation"
+
+
 def test_determinism_same_input_same_output():
     a = parse(_inline(SYSLOG)).to_dict()
     b = parse(_inline(SYSLOG)).to_dict()

@@ -16,6 +16,7 @@ from .converters import JSONConverter
 from .sql_formatter import format_sql_fields, unescape_sql_in_json
 from .message_expander import expand_message_fields, deep_expand, group_infra_fields, strip_k8s_fields
 from .text_parser import parse_generic_line, is_export_metadata
+from .multiline_parser import parse_python_traceback, parse_go_panic, parse_exception_group
 
 logger = logging.getLogger(__name__)
 
@@ -433,6 +434,15 @@ class UniversalLogParser:
 
         elif fmt == LogFormat.LOGFMT:
             return self.converter.convert_logfmt_to_json(cleaned)
+
+        elif fmt == LogFormat.PYTHON_TRACEBACK:
+            return [parse_python_traceback(cleaned)]
+
+        elif fmt == LogFormat.GO_PANIC:
+            return parse_go_panic(cleaned)
+
+        elif fmt == LogFormat.EXCEPTION_GROUP:
+            return [parse_exception_group(cleaned)]
 
         elif fmt == LogFormat.TEXT:
             if self.pattern:

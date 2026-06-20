@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Optional
 
 from .cleaners import reframe_tabular, _is_header_like
+from .multiline_parser import is_python_traceback, is_go_panic, is_exception_group
 
 
 class LogFormat(Enum):
@@ -25,6 +26,9 @@ class LogFormat(Enum):
     LOKI_NGINX = "loki_nginx"
     SYSLOG = "syslog"
     LOGFMT = "logfmt"  # key=value пары (Go/Grafana/Heroku/systemd)
+    PYTHON_TRACEBACK = "python_traceback"  # Python traceback / Flask error block
+    GO_PANIC = "go_panic"                  # Go goroutine dump with panic
+    EXCEPTION_GROUP = "exception_group"    # Python ExceptionGroup / anyio TaskGroup
     TEXT = "text"  # Произвольный текстовый лог
     UNKNOWN = "unknown"
 
@@ -155,6 +159,16 @@ class FormatDetector:
 
         # Берём sample_size строк для анализа
         sample = lines[: self.sample_size]
+
+        # 0.5. Мультистрочные форматы: Python traceback, ExceptionGroup, Go panic.
+        #      Проверяем ДО CSV — иначе трейсбеки с кавычками в путях (File "...") могут
+        #      попасть в CSV (csv.reader интерпретирует " как кавычку поля).
+        if is_exception_group(sample, stripped):
+            return LogFormat.EXCEPTION_GROUP
+        if is_python_traceback(sample, stripped):
+            return LogFormat.PYTHON_TRACEBACK
+        if is_go_panic(sample, stripped):
+            return LogFormat.GO_PANIC
 
         # 1. Проверяем JSON / JSONL
         json_format = self._detect_json(sample)
