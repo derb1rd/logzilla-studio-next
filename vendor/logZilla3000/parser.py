@@ -95,6 +95,7 @@ class UniversalLogParser:
         ensure_ascii: bool = False,
         # SQL-форматирование
         format_sql: bool = True,
+        bind_sql_args: bool = False,
         # Раскрытие вложенных JSON в message
         expand_message: bool = True,
         # Удаление k8s-инфраструктурного шума (pod/container/labels/docker)
@@ -164,6 +165,7 @@ class UniversalLogParser:
 
         # SQL-форматирование
         self.format_sql = format_sql
+        self.bind_sql_args = bind_sql_args
 
         # Раскрытие вложенных JSON в message
         self.expand_message = expand_message
@@ -228,7 +230,7 @@ class UniversalLogParser:
             result = strip_k8s_fields(result)
 
         # 6. SQL-форматирование
-        result = format_sql_fields(result, enabled=self.format_sql)
+        result = format_sql_fields(result, enabled=self.format_sql, bind_args=self.bind_sql_args)
 
         return result
 
@@ -299,7 +301,7 @@ class UniversalLogParser:
         result = group_infra_fields(result, enabled=self.expand_message)
         if self.strip_k8s:
             result = strip_k8s_fields(result)
-        result = format_sql_fields(result, enabled=self.format_sql)
+        result = format_sql_fields(result, enabled=self.format_sql, bind_args=self.bind_sql_args)
         return result
 
     def parse_files(self, filepaths: list[str]) -> list[dict[str, Any]]:

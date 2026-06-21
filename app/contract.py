@@ -75,6 +75,7 @@ class ParseOptions:
     expand_message: bool = True
     compact_json: bool = False  # → indent=None
     format_sql: bool = True
+    bind_sql_args: bool = False
     strip_k8s: bool = False
 
     @classmethod
@@ -91,6 +92,7 @@ class ParseOptions:
             expand_message=_as_bool(d.get("expand_message"), "options.expand_message", True),
             compact_json=_as_bool(d.get("compact_json"), "options.compact_json", False),
             format_sql=_as_bool(d.get("format_sql"), "options.format_sql", True),
+            bind_sql_args=_as_bool(d.get("bind_sql_args"), "options.bind_sql_args", False),
             strip_k8s=_as_bool(d.get("strip_k8s"), "options.strip_k8s", False),
         )
 
@@ -103,6 +105,7 @@ class ParseOptions:
             "expand_message": self.expand_message,
             "compact_json": self.compact_json,
             "format_sql": self.format_sql,
+            "bind_sql_args": self.bind_sql_args,
             "strip_k8s": self.strip_k8s,
         }
 

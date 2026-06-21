@@ -16,6 +16,9 @@ import logging
 from functools import lru_cache
 from typing import Any
 
+# Ключи, в которых могут лежать позиционные аргументы к SQL-запросу
+ARGS_KEYS = {"args", "parameters", "bind_parameters", "query_args", "query_parameters"}
+
 logger = logging.getLogger(__name__)
 
 # Кешируем результат импорта sqlparse: модуль (если есть) или None. Предупреждение
@@ -114,34 +117,126 @@ def format_sql(value: str) -> str:
     return _format_sql_cached(value)
 
 
-def format_sql_fields(data: Any, enabled: bool = True) -> Any:
+def _parse_pg_array_literal(inner: str) -> list[str]:
+    """Разбирает внутренность PostgreSQL-массива {a,"b c",NULL} в список строк."""
+    items: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    i = 0
+    while i < len(inner):
+        c = inner[i]
+        if c == '"' and not in_quotes:
+            in_quotes = True
+        elif c == '"' and in_quotes:
+            if i + 1 < len(inner) and inner[i + 1] == '"':
+                current.append('"')
+                i += 2
+                continue
+            in_quotes = False
+        elif c == ',' and not in_quotes:
+            items.append(''.join(current).strip())
+            current = []
+        else:
+            current.append(c)
+        i += 1
+    items.append(''.join(current).strip())
+    return items
+
+
+def _parse_args(args: Any) -> list[str] | None:
+    """Разбирает поле args в упорядоченный список строк. None при неразборе."""
+    if isinstance(args, list):
+        return [str(a) for a in args]
+    if not isinstance(args, str):
+        return None
+    s = args.strip()
+    if s.startswith("["):
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [str(a) for a in parsed]
+        except (json.JSONDecodeError, ValueError):
+            pass
+    if s.startswith("{") and s.endswith("}"):
+        return _parse_pg_array_literal(s[1:-1])
+    return None
+
+
+def _quote_arg(value: str) -> str:
+    """Форматирует аргумент для вставки в SQL (только для отображения, не для выполнения)."""
+    s = value.strip()
+    if s.upper() == "NULL":
+        return "NULL"
+    try:
+        int(s)
+        return s
+    except ValueError:
+        pass
+    try:
+        float(s)
+        return s
+    except ValueError:
+        pass
+    return "'" + s.replace("'", "''") + "'"
+
+
+def bind_args_to_sql(sql: str, args: Any) -> str:
+    """Подставляет позиционные аргументы ($1, $2 …) в SQL-запрос.
+
+    Результат предназначен только для отображения, а не для передачи в СУБД.
+    Если args не разобрался или список пуст — возвращает sql без изменений.
     """
-    Рекурсивно обходит структуру данных и форматирует
-    все строковые поля с ключами из SQL_KEYS.
+    parsed = _parse_args(args)
+    if not parsed:
+        return sql
+
+    def _replace(m: re.Match) -> str:
+        idx = int(m.group(1)) - 1
+        if 0 <= idx < len(parsed):
+            return _quote_arg(parsed[idx])
+        return m.group(0)
+
+    return re.sub(r'\$(\d+)', _replace, sql)
+
+
+def format_sql_fields(data: Any, enabled: bool = True, bind_args: bool = False) -> Any:
+    """Рекурсивно обходит структуру данных, форматирует SQL-поля и подставляет args.
 
     Args:
         data: Структура данных (dict, list или примитив)
-        enabled: Включено ли форматирование SQL
+        enabled: Включено ли pretty-форматирование SQL через sqlparse
+        bind_args: Подставлять ли позиционные аргументы ($1/$2…) из поля args
 
     Returns:
-        Структура данных с отформатированными SQL-полями
+        Структура данных с обработанными SQL-полями
     """
-    if not enabled:
+    if not enabled and not bind_args:
         return data
 
     if isinstance(data, dict):
+        # Ищем args-поле на текущем уровне (для bind_args)
+        args_value = None
+        if bind_args:
+            for ak in ARGS_KEYS:
+                if ak in data:
+                    args_value = data[ak]
+                    break
+
         result = {}
         for key, value in data.items():
             if isinstance(value, str) and key.lower() in SQL_KEYS:
-                result[key] = format_sql(value)
+                out = format_sql(value) if enabled else value
+                if bind_args and args_value is not None:
+                    out = bind_args_to_sql(out, args_value)
+                result[key] = out
             elif isinstance(value, (dict, list)):
-                result[key] = format_sql_fields(value, enabled=enabled)
+                result[key] = format_sql_fields(value, enabled=enabled, bind_args=bind_args)
             else:
                 result[key] = value
         return result
 
     if isinstance(data, list):
-        return [format_sql_fields(item, enabled=enabled) for item in data]
+        return [format_sql_fields(item, enabled=enabled, bind_args=bind_args) for item in data]
 
     return data
 

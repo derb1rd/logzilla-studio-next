@@ -96,6 +96,7 @@ function collectOptions() {
     strip_k8s: $("strip_k8s").checked,
     compact_json: $("compact_json").checked,
     format_sql: true,
+    bind_sql_args: $("bind_sql_args").checked,
   };
 }
 
@@ -1087,7 +1088,7 @@ function exportTs() {
 
 // --- prefs (localStorage) ---------------------------------------------------
 const PREFS_KEY = "logzilla3000.prefs.v1";
-const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "ndjson", "flatten"];
+const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "bind_sql_args", "ndjson", "flatten"];
 
 function savePrefs() {
   const prefs = {
