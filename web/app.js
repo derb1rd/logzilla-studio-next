@@ -375,6 +375,26 @@ function renderSourcePanel() {
   const sorted = [...srcCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 
   container.innerHTML = "";
+
+  if (srcCounts.size >= 2) {
+    const actions = document.createElement("div");
+    actions.className = "src-actions";
+    const btnAll = document.createElement("button");
+    btnAll.textContent = "Все";
+    const btnNone = document.createElement("button");
+    btnNone.textContent = "Снять";
+    actions.append(btnAll, btnNone);
+    btnAll.addEventListener("click", () => {
+      container.querySelectorAll(".src-cb").forEach((c) => { c.checked = true; c.closest(".src-tile").classList.remove("off"); });
+      applySearch();
+    });
+    btnNone.addEventListener("click", () => {
+      container.querySelectorAll(".src-cb").forEach((c) => { c.checked = false; c.closest(".src-tile").classList.add("off"); });
+      applySearch();
+    });
+    container.appendChild(actions);
+  }
+
   for (const [src, cnt] of sorted) {
     const label = document.createElement("label");
     label.className = "src-tile" + (prevOff.has(src) ? " off" : "");

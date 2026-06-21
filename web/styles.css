@@ -288,6 +288,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline-offset
 .src-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .src-count { color: var(--muted); font-size: var(--fs-xs); }
 .src-hint { font-size: var(--fs-xs); color: var(--subtle); padding: 4px 0; text-align: center; }
+.src-actions { display: flex; gap: 6px; padding-bottom: 6px; position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.src-actions button { flex: 1; font: var(--fs-xs)/1 var(--mono); padding: 4px 6px; border-radius: var(--r-sm); border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); cursor: pointer; transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+.src-actions button:hover { border-color: var(--border-hi); color: var(--text); }
 .stream-row .r-msg { color: var(--code); white-space: pre-wrap; overflow-wrap: anywhere; }
 /* подсветка совпадений поиска */
 mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 2px; padding: 0 1px; }
