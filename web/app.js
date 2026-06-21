@@ -370,16 +370,27 @@ function renderSourcePanel() {
     return;
   }
 
+  // Если единственный «источник» — пустая строка, источники не определяются.
+  const namedCount = srcCounts.size - (srcCounts.has("") ? 1 : 0);
+  if (namedCount === 0) {
+    container.innerHTML = '<span class="src-hint">источник не определён</span>';
+    return;
+  }
+
   // Сохраняем предыдущий выбор (чтобы не сбрасывать при переключении файлов)
   const prevOff = new Set();
   container.querySelectorAll(".src-cb").forEach((c) => { if (!c.checked) prevOff.add(c.value); });
 
-  // Сортируем: по убыванию числа записей, потом алфавитно
-  const sorted = [...srcCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  // Сортируем: по убыванию числа записей, потом алфавитно; "" — всегда в конце
+  const sorted = [...srcCounts.entries()].sort((a, b) => {
+    if (a[0] === "" && b[0] !== "") return 1;
+    if (a[0] !== "" && b[0] === "") return -1;
+    return b[1] - a[1] || a[0].localeCompare(b[0]);
+  });
 
   container.innerHTML = "";
 
-  if (srcCounts.size >= 2) {
+  if (namedCount >= 2) {
     const actions = document.createElement("div");
     actions.className = "src-actions";
     const btnAll = document.createElement("button");
@@ -400,7 +411,7 @@ function renderSourcePanel() {
 
   for (const [src, cnt] of sorted) {
     const label = document.createElement("label");
-    label.className = "src-tile" + (prevOff.has(src) ? " off" : "");
+    label.className = "src-tile" + (prevOff.has(src) ? " off" : "") + (src === "" ? " src-unknown" : "");
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.className = "src-cb";
@@ -409,7 +420,8 @@ function renderSourcePanel() {
     label.appendChild(cb);
     const nameEl = document.createElement("span");
     nameEl.className = "src-name";
-    nameEl.textContent = src || "?";
+    nameEl.textContent = src || "—";
+    if (src === "") label.title = "записи без определённого источника";
     label.appendChild(nameEl);
     const cntEl = document.createElement("span");
     cntEl.className = "src-count";
