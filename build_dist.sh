@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build_dist.sh — собирает САМОДОСТАТОЧНУЮ папку logzilla-studio (Вариант А).
+# build_dist.sh — собирает САМОДОСТАТОЧНУЮ папку logzilla3000 (Вариант А).
 #
 # Результат: папка, которую можно «отдать» целиком. На машине получателя нужен
 # только python3 (3.10+) — никакого pip/venv/сети/Homebrew. Ядро logZilla3000 и
@@ -9,12 +9,12 @@
 # Дев-репозиторий не засоряется: всё кладётся в dist/, копии в git не попадают.
 #
 # Использование:
-#   ./build_dist.sh                 # → dist/logzilla-studio
+#   ./build_dist.sh                 # → dist/logzilla3000
 #   ./build_dist.sh /путь/назначения
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-DIST="${1:-$HERE/dist/logzilla-studio}"
+DIST="${1:-$HERE/dist/logzilla3000}"
 
 # --- 1. Проверить наличие завендоренного ядра -----------------------------
 if [ ! -f "$HERE/vendor/logZilla3000/__init__.py" ]; then
@@ -24,13 +24,13 @@ if [ ! -f "$HERE/vendor/logZilla3000/__init__.py" ]; then
 fi
 
 echo "→ Сборка дистрибутива"
-echo "  studio: $HERE"
+echo "  src:  $HERE"
 echo "  цель:   $DIST"
 
 rm -rf "$DIST"
 mkdir -p "$DIST/vendor"
 
-# --- 2. studio (app + web) ------------------------------------------------
+# --- 2. app + web ---------------------------------------------------------
 rsync -a --exclude='__pycache__' "$HERE/app" "$DIST/"
 rsync -a --exclude='__pycache__' "$HERE/web" "$DIST/"
 
@@ -39,7 +39,7 @@ rsync -a --exclude='__pycache__' "$HERE/web" "$DIST/"
 # деградирует без него; если sqlparse в vendor/ нет — папка всё равно рабочая.
 #
 # Точки входа standalone-ядра (gui.py/cli.py/__main__.py) в раздачу НЕ кладём:
-# studio их не импортирует (использует parser/detectors), а gui.py тянет
+# logzilla3000 их не импортирует (использует parser/detectors), а gui.py тянет
 # незавендоренный tkinterdnd2 — в сборке это лишь мёртвый код со сломанной
 # зависимостью. Исходник в vendor/ остаётся нетронутым.
 rsync -a --exclude='__pycache__' --exclude='tests' \
@@ -54,13 +54,13 @@ fi
 # --- 5. Лаунчеры ----------------------------------------------------------
 cat > "$DIST/run.sh" <<'EOF'
 #!/usr/bin/env bash
-# Запуск logzilla-studio из терминала. Нужен только python3 (всё остальное в vendor/).
+# Запуск logzilla3000. Нужен только python3 (всё остальное в vendor/).
 set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${PORT:-8765}"
 HOST="${HOST:-127.0.0.1}"
 URL="http://${HOST}:${PORT}"
-echo "logzilla-studio → $URL"
+echo "logzilla3000 → $URL"
 if [ "${NO_OPEN:-}" != "1" ] && command -v open >/dev/null 2>&1; then
   ( sleep 1; open "$URL" ) &
 fi
@@ -84,7 +84,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "logZilla Studio → $URL"
+echo "logZilla3000 → $URL"
 echo "(закройте это окно, чтобы остановить)"
 ( sleep 1; open "$URL" ) &
 exec python3 -m app.server --host "$HOST" --port "$PORT"
@@ -93,7 +93,7 @@ chmod +x "$DIST/Запустить.command"
 
 # --- 6. README ------------------------------------------------------------
 cat > "$DIST/README.txt" <<'EOF'
-logZilla Studio — локальный парсер логов (самодостаточная сборка)
+logZilla3000 — локальный парсер логов (самодостаточная сборка)
 
 ТРЕБОВАНИЯ
   • macOS с Python 3.10+ (проверка в терминале: python3 --version).

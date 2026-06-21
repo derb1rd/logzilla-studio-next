@@ -5,7 +5,7 @@
 //   2. перехват JS-ошибок (window.onerror + unhandledrejection) → /api/client-log;
 //   3. корреляция: каждый HTTP-запрос несёт X-Session-Id / X-Correlation-Id,
 //      что связывает action клиента с run_id сервера.
-// Глобально доступен как `obs`; ручной дамп — window.__studioDebug.dump().
+// Глобально доступен как `obs`; ручной дамп — window.__logzilla3000Debug.dump().
 
 const obs = (() => {
   const sessionId = "s-" + Math.random().toString(36).slice(2, 10);
@@ -75,6 +75,6 @@ const obs = (() => {
     URL.revokeObjectURL(url);
   }
 
-  window.__studioDebug = { dump, recent, sessionId, report };
+  window.__logzilla3000Debug = { dump, recent, sessionId, report };
   return { action, fetch: fetchObs, report, dump, sessionId };
 })();

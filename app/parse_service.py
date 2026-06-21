@@ -32,7 +32,7 @@ from .contract import (
 )
 from .logging_setup import log_event
 
-logger = logging.getLogger("studio.parse")
+logger = logging.getLogger("logzilla3000.parse")
 
 _LEVEL_RE = re.compile(
     r"\b(DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL|TRACE)\b", re.IGNORECASE

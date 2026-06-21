@@ -15,9 +15,9 @@ jobs:
 
       - name: Сборка самодостаточной папки
         run: |
-          ./build_dist.sh out/logzilla-studio
+          ./build_dist.sh out/logzilla3000
           cd out
-          zip -r "logzilla-studio-${GITHUB_REF_NAME}.zip" logzilla-studio
+          zip -r "logzilla3000-${GITHUB_REF_NAME}.zip" logzilla3000
           shasum -a 256 *.zip > SHA256SUMS
 
       - name: GitHub Release

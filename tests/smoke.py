@@ -8,15 +8,15 @@ import sys
 from pathlib import Path
 
 # bootstrap путей: делаем импортируемым `app` (ядро подключит app/__init__.py)
-_STUDIO = Path(__file__).resolve().parents[1]
-if str(_STUDIO) not in sys.path:
-    sys.path.insert(0, str(_STUDIO))
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from app.contract import ExportOptions, ExportRequest, ParseRequest  # noqa: E402
 from app.export_service import export  # noqa: E402
 from app.parse_service import parse, parse_all_records  # noqa: E402
 
-SYSLOG = (_STUDIO / "tests" / "fixtures" / "syslog_sample.log").read_text(encoding="utf-8")
+SYSLOG = (_ROOT / "tests" / "fixtures" / "syslog_sample.log").read_text(encoding="utf-8")
 
 
 def check(name: str, cond: bool) -> None:

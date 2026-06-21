@@ -1,8 +1,8 @@
 "use strict";
 
-// logZilla3000 · studio — Inspector Split.
-// Та же граница UI ↔ ядро (HTTP/JSON-контракт /api/parse · /api/export), что и в
-// базовом studio; здесь переписан только слой представления под 3-pane layout
+// logZilla3000 — Inspector Split.
+// Граница UI ↔ ядро (HTTP/JSON-контракт /api/parse · /api/export).
+// Слой представления под 3-pane layout
 // концепта 11: дерево источника слева, поток логов в центре, инспектор записи справа.
 //
 // МУЛЬТИФАЙЛОВАЯ СЕССИЯ. Сессия живёт во фронте: каждый файл = независимый
@@ -1086,7 +1086,7 @@ function exportTs() {
 }
 
 // --- prefs (localStorage) ---------------------------------------------------
-const PREFS_KEY = "logzilla-studio-next.prefs.v1";
+const PREFS_KEY = "logzilla3000.prefs.v1";
 const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "ndjson", "flatten"];
 
 function savePrefs() {

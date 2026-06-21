@@ -29,14 +29,14 @@ from .export_service import export
 from .logging_setup import log_event, setup_logging
 from .parse_service import parse, parse_all_records
 
-logger = logging.getLogger("studio.server")
+logger = logging.getLogger("logzilla3000.server")
 
 _WEB_DIR = Path(__file__).resolve().parents[1] / "web"
 _MAX_BODY = 64 * 1024 * 1024  # 64 МБ — защита от чрезмерного ввода (MVP)
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = f"logzilla-studio/{__version__}"
+    server_version = f"logzilla3000/{__version__}"
 
     # --- утилиты ответа ------------------------------------------------- #
     def _send_json(self, obj: dict, status: int = 200) -> None:
@@ -75,7 +75,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 (имя задано BaseHTTPRequestHandler)
         path = self.path.split("?", 1)[0]
         if path == "/api/health":
-            self._send_json({"status": "ok", "service": "logzilla-studio", "version": __version__})
+            self._send_json({"status": "ok", "service": "logzilla3000", "version": __version__})
             return
         self._serve_static(path)
 
@@ -234,7 +234,7 @@ def run(host: str = "127.0.0.1", port: int = 8765) -> None:
 
 def main() -> None:
     import os
-    ap = argparse.ArgumentParser(description="logzilla-studio HTTP-сервер")
+    ap = argparse.ArgumentParser(description="logzilla3000 HTTP-сервер")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8765)))
     args = ap.parse_args()

@@ -8,7 +8,7 @@ vendor/ кладём в путь и здесь.
 import sys
 from pathlib import Path
 
-_STUDIO_ROOT = Path(__file__).resolve().parents[1]   # logzilla-studio-next/
-for _p in (_STUDIO_ROOT, _STUDIO_ROOT / "vendor"):
+_ROOT = Path(__file__).resolve().parents[1]   # logzilla-studio-next/
+for _p in (_ROOT, _ROOT / "vendor"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))

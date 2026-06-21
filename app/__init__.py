@@ -1,4 +1,4 @@
-"""logzilla-studio — HTTP/JSON-сервис и web-UI поверх ядра logZilla3000.
+"""logzilla3000 — HTTP/JSON-сервис и web-UI поверх ядра logZilla3000.
 
 Самодостаточный продукт: ядро (пакет logZilla3000) и его опциональная зависимость
 sqlparse вендорятся внутрь — в каталог vendor/ рядом с app/. Граница UI ↔ ядро
