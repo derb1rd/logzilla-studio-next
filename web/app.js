@@ -10,6 +10,8 @@
 // колонка — дерево файлов; активный файл питает поток/инспектор. «Контекст»
 // собирает трассу по req_id ПО ВСЕМ файлам сессии (распределённый трейс).
 
+let _serverVersion = "?";
+
 const state = {
   // Сессия = упорядоченный список файлов + id активного.
   // FileEntry: { id, name, size, text, file(File|null), request, result,
@@ -71,6 +73,7 @@ async function checkHealth() {
   try {
     const r = await obs.fetch("/api/health");
     const j = await r.json();
+    _serverVersion = j.version || "?";
     el.textContent = `● ${j.service} v${j.version}`;
     el.className = "status ok";
   } catch {
@@ -985,7 +988,21 @@ async function doExport() {
   if ($("exportScope").value === "all") return doExportAll();
   const entry = activeEntry();
   if (!entry || !entry.request) { setFooter("Сначала выполните парсинг."); return; }
-  const req = { version: "1", parse_request: entry.request, options: { ndjson: $("ndjson").checked, flatten: $("flatten").checked } };
+  const ndjson = $("ndjson").checked;
+  const flatten = $("flatten").checked;
+
+  if ($("export_filtered").checked) {
+    const records = state.view;   // уже отфильтровано: уровни + источники + поиск
+    const ext = ndjson ? "ndjson" : "json";
+    const mime = ndjson ? "application/x-ndjson" : "application/json";
+    const name = `${baseName(entry.name)}_filtered_${exportTs()}.${ext}`;
+    obs.action("export_filtered_clicked", { records: records.length, ndjson, file: entry.name });
+    downloadBlob(new Blob([_serializeFiltered(records, ndjson, flatten)], { type: mime }), name);
+    setFooter(`Экспортировано (видимые): ${ru(records.length)} записей → ${name}`);
+    return;
+  }
+
+  const req = { version: "1", parse_request: entry.request, options: { ndjson, flatten } };
   obs.action("export_clicked", { ndjson: req.options.ndjson, file: entry.name });
   $("exportBtn").disabled = true;
   $("exportBtn").classList.add("loading");
@@ -1026,12 +1043,44 @@ async function doExport() {
 // и скачивается самостоятельно. Между загрузками — пауза: браузеры троттлят
 // множественные программные скачивания. Ошибка одного файла не прерывает остальные.
 async function doExportAll() {
-  const parsed = state.session.files.filter((f) => f.request && f.status === "parsed");
+  const parsed = state.session.files.filter((f) => f.records?.length && f.status === "parsed");
   if (!parsed.length) { setFooter("Нет распарсенных файлов для экспорта."); return; }
   const ndjson = $("ndjson").checked;
   const flatten = $("flatten").checked;
   const ext = ndjson ? "ndjson" : "json";
+  const mime = ndjson ? "application/x-ndjson" : "application/json";
   obs.action("export_all_clicked", { files: parsed.length, ndjson });
+
+  if ($("export_filtered").checked) {
+    $("exportBtn").disabled = true;
+    $("exportBtn").classList.add("loading");
+    showProgress(0);
+    const ts = exportTs();
+    const nameCounts = new Map();
+    try {
+      for (let k = 0; k < parsed.length; k++) {
+        const f = parsed[k];
+        const recs = _filteredRecords(f.records);
+        const base = baseName(f.name);
+        const n = (nameCounts.get(base) || 0) + 1;
+        nameCounts.set(base, n);
+        const fname = n > 1 ? `${base}_filtered_${ts}_${n}.${ext}` : `${base}_filtered_${ts}.${ext}`;
+        downloadBlob(new Blob([_serializeFiltered(recs, ndjson, flatten)], { type: mime }), fname);
+        setFooter(`Экспорт (видимые)… (${k + 1}/${parsed.length})`);
+        showProgress(((k + 1) / parsed.length) * 100);
+        if (k < parsed.length - 1) await sleep(250);
+      }
+    } finally {
+      $("exportBtn").disabled = false;
+      $("exportBtn").classList.remove("loading");
+      hideProgress();
+    }
+    obs.action("export_all_filtered_done", { files: parsed.length });
+    setFooter(`Экспорт (видимые) завершён: ${parsed.length} файлов`);
+    return;
+  }
+
+
   $("exportBtn").disabled = true;
   $("exportBtn").classList.add("loading");
   showProgress(0);
@@ -1082,6 +1131,40 @@ async function doExportAll() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// --- клиентская сериализация для «только видимые» ----------------------------
+function _flattenRec(obj, prefix = "", sep = ".") {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}${sep}${k}` : k;
+    if (v !== null && typeof v === "object" && !Array.isArray(v)) {
+      Object.assign(out, _flattenRec(v, key, sep));
+    } else {
+      out[key] = v;
+    }
+  }
+  return out;
+}
+
+function _serializeFiltered(records, ndjson, doFlatten) {
+  const recs = doFlatten ? records.map((r) => _flattenRec(r)) : records;
+  const meta = { logzilla_version: _serverVersion, exported_at: new Date().toISOString(), filtered: true };
+  if (ndjson) {
+    return [JSON.stringify({ _logzilla: meta }), ...recs.map((r) => JSON.stringify(r))].join("\n") + "\n";
+  }
+  return JSON.stringify({ _logzilla: meta, records: recs }, null, 2) + "\n";
+}
+
+function _filteredRecords(recs) {
+  const off = hiddenLevels();
+  const offSrc = hiddenSources();
+  if (off.size === 0 && offSrc.size === 0) return recs;
+  return recs.filter((rec) => {
+    if (off.has(levelOf(rec) || "OTHER")) return false;
+    if (offSrc.size > 0 && offSrc.has(sourceOf(rec))) return false;
+    return true;
+  });
+}
+
 function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1108,7 +1191,7 @@ function exportTs() {
 
 // --- prefs (localStorage) ---------------------------------------------------
 const PREFS_KEY = "logzilla3000.prefs.v1";
-const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "bind_sql_args", "ndjson", "flatten"];
+const PREF_CHECKS = ["compact_json", "remove_duplicates", "remove_ansi", "expand_message", "strip_k8s", "bind_sql_args", "ndjson", "flatten", "export_filtered"];
 
 function savePrefs() {
   const prefs = {
