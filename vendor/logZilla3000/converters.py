@@ -408,6 +408,21 @@ class JSONConverter:
     )
     # Structured-data блок RFC5424 в начале MSG: [id k="v" ...][id2 ...]
     _SYSLOG_SD = re.compile(r'^(?:\[[^\]]*\]\s*)+')
+    # Уровень в теле syslog-сообщения: "ERROR: conn refused" → level=ERROR, message="conn refused".
+    # Только ALL-CAPS или первый токен с двоеточием — чтобы не срезать нормальную прозу.
+    _SYSLOG_MSG_LEVEL = re.compile(
+        r'^(?P<level>TRACE|DEBUG|INFO|NOTICE|WARN|WARNING|ERROR|ERR|CRIT|CRITICAL|FATAL|ALERT|EMERG|EMERGENCY)'
+        r'(?:\s*[:\s]\s*)',
+        re.IGNORECASE,
+    )
+    _SYSLOG_LEVEL_CANON: dict[str, str] = {
+        "TRACE": "TRACE", "DEBUG": "DEBUG", "INFO": "INFO", "NOTICE": "INFO",
+        "WARN": "WARN", "WARNING": "WARN",
+        "ERROR": "ERROR", "ERR": "ERROR",
+        "CRIT": "CRITICAL", "CRITICAL": "CRITICAL",
+        "FATAL": "FATAL", "ALERT": "ALERT",
+        "EMERG": "EMERG", "EMERGENCY": "EMERG",
+    }
 
     def convert_syslog_to_json(self, data: str) -> list[dict[str, Any]]:
         """
@@ -438,6 +453,14 @@ class JSONConverter:
                 rec = m.groupdict()
                 if rec.get("pid"):
                     rec["pid"] = int(rec["pid"])
+                # Извлекаем уровень из тела сообщения: "ERROR: conn refused" → level+message
+                msg = rec.get("message", "")
+                if msg and "level" not in rec:
+                    lm = self._SYSLOG_MSG_LEVEL.match(msg)
+                    if lm:
+                        token = lm.group("level").upper()
+                        rec["level"] = self._SYSLOG_LEVEL_CANON.get(token, token)
+                        rec["message"] = msg[lm.end():]
                 if self.normalize_keys:
                     rec = {self._normalize_key(k): v for k, v in rec.items()}
                 result.append(rec)

@@ -15,7 +15,7 @@ from .detectors import FormatDetector, LogFormat
 from .converters import JSONConverter
 from .sql_formatter import format_sql_fields, unescape_sql_in_json
 from .message_expander import expand_message_fields, deep_expand, group_infra_fields, strip_k8s_fields
-from .text_parser import parse_generic_line, is_export_metadata
+from .text_parser import parse_generic_line, is_export_metadata, enrich_network_error
 from .multiline_parser import parse_python_traceback, parse_go_panic, parse_exception_group
 
 logger = logging.getLogger(__name__)
@@ -479,7 +479,9 @@ class UniversalLogParser:
             if is_export_metadata(line):
                 continue
             rec = parse_generic_line(line)
-            results.append(rec if rec is not None else {"message": line})
+            if rec is None:
+                rec = {"message": line}
+            results.append(enrich_network_error(rec))
         return results
 
     def _expand_json_columns(self, result: Any, fmt: LogFormat) -> Any:

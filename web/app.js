@@ -616,6 +616,14 @@ function msgCell(rec) {
   if (c.url) { if (c.method) span.appendChild(document.createTextNode(" ")); appendHighlighted(span, c.url); started = true; }
   if (c.status) { sep(); chip("r-status s-" + statusMod(c.status), c.status); }
   if (c.dur) { sep(); span.appendChild(document.createTextNode(c.dur)); started = true; }
+  // Тип исключения для трейсбеков: показываем короткое имя (последний сегмент).
+  if (rec.type && (rec.frames || rec.traceback || rec.sub_exceptions)) {
+    sep(); chip("r-exc-type", String(rec.type).split(".").pop());
+  }
+  // Network error: адрес/порт назначения и причина ошибки.
+  if (rec.error_addr) { sep(); chip("r-net-addr", rec.error_port ? `${rec.error_addr}:${rec.error_port}` : String(rec.error_addr)); }
+  if (rec.error_type && !rec.error_addr) { sep(); chip("r-net-error", String(rec.error_type).replace(/_/g, " ")); }
+  if (rec.rpc_code) { sep(); chip("r-net-error", `rpc:${rec.rpc_code}`); }
   if (c.base) { sep(); appendHighlighted(span, c.base); }
   if (c.sql) { sep(); chip("r-sql", "sql"); span.appendChild(document.createTextNode(" ")); appendHighlighted(span, c.sql); }
   if (!started && !c.base) span.textContent = msgOf(rec);   // запас на пустую запись
@@ -782,7 +790,7 @@ function renderTab() {
   const rec = state.selectedRec;
   if (!rec) { body.innerHTML = ""; return; }
   if (state.activeTab === "struct") {
-    body.innerHTML = sqlBlockHtml(rec) + jsonHtml(rec) + histoHtml();
+    body.innerHTML = sqlBlockHtml(rec) + tracebackBlockHtml(rec) + jsonHtml(rec) + histoHtml();
   } else {
     body.innerHTML = contextHtml();
     bindCtxRows();
@@ -817,10 +825,29 @@ function sqlBlockHtml(rec) {
     `<pre class="sql-code">${sqlHighlight(sql)}</pre></div>`;
 }
 
+// Traceback-блок инспектора: полный текст трейсбека/стека в pre-блоке с типом ошибки.
+// traceback/stacktrace скрываются из jsonHtml (TB_KEYS) — здесь они показываются полностью.
+function tracebackBlockHtml(rec) {
+  const tb = (typeof rec.traceback === "string" && rec.traceback)
+           || (typeof rec.stacktrace === "string" && rec.stacktrace);
+  if (!tb) return "";
+  const typeHtml = rec.type
+    ? ` · <span class="tb-type">${escapeHtml(String(rec.type))}</span>` : "";
+  const fc = Array.isArray(rec.frames) ? rec.frames.length : 0;
+  const fcHtml = fc ? `<span class="tb-frames">${fc} frame${fc !== 1 ? "s" : ""}</span>` : "";
+  return `<div class="tb-block">` +
+    `<div class="tb-block-label">TRACEBACK${typeHtml}${fcHtml}</div>` +
+    `<pre class="tb-code">${escapeHtml(tb)}</pre>` +
+    `</div>`;
+}
+
+// traceback/stacktrace показываются в tb-block — в JSON-виде дублировать не нужно.
+const TB_KEYS = new Set(["traceback", "stacktrace"]);
+
 // pretty-print JSON с подсветкой; уровень окрашиваем по значению
 function jsonHtml(rec) {
   const lines = ['<div class="json-line">{</div>'];
-  const entries = Object.entries(rec);
+  const entries = Object.entries(rec).filter(([k]) => !TB_KEYS.has(k));
   entries.forEach(([k, v], idx) => {
     const comma = idx < entries.length - 1 ? "," : "";
     lines.push(`<div class="json-line" style="padding-left:14px"><span class="j-key">"${escapeHtml(k)}"</span>: ${valHtml(k, v)}${comma}</div>`);
@@ -829,11 +856,31 @@ function jsonHtml(rec) {
   return lines.join("");
 }
 
+// Компактный рендер массива frames / sub_exceptions вместо JSON.stringify-blob.
+function framesHtml(arr, key) {
+  const items = arr.map((f, i) => {
+    if (key === "sub_exceptions") {
+      const t = escapeHtml(String(f.type || "?"));
+      const m = f.message ? `: <span class="j-str">"${escapeHtml(String(f.message))}"</span>` : "";
+      return `<div class="frame-item"><span class="j-key">${t}</span>${m}</div>`;
+    }
+    const loc = escapeHtml(`${f.file || "?"}:${f.line || "?"}`);
+    const fn = f.function ? ` <span class="frame-fn">${escapeHtml(f.function)}</span>` : "";
+    return `<div class="frame-item"><span class="frame-n">${i}</span><span class="j-str">${loc}</span>${fn}</div>`;
+  }).join("");
+  return `<div class="frames-list">[${items}]</div>`;
+}
+
 function valHtml(key, v) {
   if (v === null) return '<span class="j-null">null</span>';
   if (typeof v === "boolean") return `<span class="j-bool">${v}</span>`;
   if (typeof v === "number") return `<span class="j-num">${v}</span>`;
-  if (typeof v === "object") return `<span class="j-str">${escapeHtml(JSON.stringify(v))}</span>`;
+  if (typeof v === "object") {
+    if (Array.isArray(v) && v.length && (key === "frames" || key === "sub_exceptions")) {
+      return framesHtml(v, key);
+    }
+    return `<span class="j-str">${escapeHtml(JSON.stringify(v))}</span>`;
+  }
   // Схлопываем переносы внутри значения: компактная запись остаётся однострочной
   // (полную форму многострочного SQL показывает выделенный SQL-блок выше).
   const flat = String(v).replace(/\s*\n\s*/g, " ");

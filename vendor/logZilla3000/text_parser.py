@@ -154,6 +154,92 @@ def _parse_klog(line: str) -> Optional[dict[str, Any]]:
     }
 
 
+# ── Network error enrichment ───────────────────────────────────────────────
+# Go stdlib сетевые ошибки: dial tcp IP:PORT, dial tcp: lookup HOSTNAME,
+# read tcp SRC->DST:PORT, rpc error: code = X, context deadline exceeded.
+# Все паттерны применяются к полю message после base-парсинга.
+
+_NET_DIAL_IP = re.compile(
+    r"(?:dial|connect)\s+(?P<proto>\w+)\s+(?P<addr>[\d.]+):(?P<port>\d+)",
+    re.IGNORECASE,
+)
+_NET_DIAL_LOOKUP = re.compile(
+    r"dial\s+\w+:\s+lookup\s+(?P<host>[^\s:]+)",
+    re.IGNORECASE,
+)
+_NET_READ_TCP = re.compile(
+    r"read\s+\w+\s+\S+-+>(?P<addr>[\d.]+):(?P<port>\d+)",
+    re.IGNORECASE,
+)
+_NET_RPC = re.compile(
+    r"rpc\s+error:\s+code\s*=\s*(?P<code>\w+)",
+    re.IGNORECASE,
+)
+_NET_CONTEXT_DEADLINE = re.compile(
+    r"context\s+(?:deadline\s+exceeded|canceled)|Client\.Timeout\s+exceeded",
+    re.IGNORECASE,
+)
+_NET_ERROR_REASON = re.compile(
+    r"\b(?P<reason>connection\s+refused|i/o\s+timeout|connection\s+reset\s+by\s+peer"
+    r"|no\s+route\s+to\s+host|network\s+is\s+unreachable|address\s+already\s+in\s+use)\b",
+    re.IGNORECASE,
+)
+
+
+def enrich_network_error(rec: dict[str, Any]) -> dict[str, Any]:
+    """Добавляет структурированные поля для Go-сетевых ошибок (text-путь).
+
+    Из "dial tcp 10.0.0.5:5558: connect: connection refused" извлекает
+    error_proto, error_addr, error_port, error_type — без перезаписи
+    существующих полей. Не применяется к структурированному JSON-пути
+    (там уже есть level/service и нужный контекст).
+    """
+    msg = str(rec.get("message") or "")
+    if not msg:
+        return rec
+
+    found = False
+
+    m = _NET_DIAL_IP.search(msg)
+    if m:
+        rec.setdefault("error_proto", m.group("proto"))
+        rec.setdefault("error_addr", m.group("addr"))
+        rec.setdefault("error_port", int(m.group("port")))
+        found = True
+
+    if not found:
+        m = _NET_DIAL_LOOKUP.search(msg)
+        if m:
+            rec.setdefault("error_proto", "tcp")
+            rec.setdefault("error_addr", m.group("host"))
+            found = True
+
+    if not found:
+        m = _NET_READ_TCP.search(msg)
+        if m:
+            rec.setdefault("error_proto", "tcp")
+            rec.setdefault("error_addr", m.group("addr"))
+            rec.setdefault("error_port", int(m.group("port")))
+            found = True
+
+    m = _NET_RPC.search(msg)
+    if m:
+        rec.setdefault("rpc_code", m.group("code"))
+        found = True
+
+    if _NET_CONTEXT_DEADLINE.search(msg):
+        rec.setdefault("error_type", "timeout")
+        found = True
+
+    if found:
+        m = _NET_ERROR_REASON.search(msg)
+        if m:
+            rec.setdefault("error_type", m.group("reason").lower().replace(" ", "_"))
+        rec.setdefault("level", "ERROR")
+
+    return rec
+
+
 def parse_generic_line(line: str) -> Optional[dict[str, Any]]:
     """Разбирает одну строку текстового лога в структурированную запись.
 
