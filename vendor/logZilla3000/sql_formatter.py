@@ -146,7 +146,13 @@ def _parse_pg_array_literal(inner: str) -> list[str]:
 def _parse_args(args: Any) -> list[str] | None:
     """Разбирает поле args в упорядоченный список строк. None при неразборе."""
     if isinstance(args, list):
-        return [str(a) for a in args]
+        out = []
+        for a in args:
+            if isinstance(a, (dict, list)):
+                out.append(json.dumps(a, ensure_ascii=False))
+            else:
+                out.append(str(a))
+        return out
     if not isinstance(args, str):
         return None
     s = args.strip()
