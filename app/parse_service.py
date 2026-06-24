@@ -22,6 +22,7 @@ from logZilla3000 import UniversalLogParser  # ядро (через bootstrap в
 from logZilla3000.detectors import FormatDetector
 
 from .opensearch_normalizer import normalize as _os_normalize
+from logZilla3000.sql_formatter import format_sql_fields as _format_sql_fields
 from .contract import (
     MAX_RECORDS,
     CONTRACT_VERSION,
@@ -222,6 +223,11 @@ def _run(req: ParseRequest) -> _Run:
         result = parser.parse(raw)
     records = _normalize(result)
     records = _os_normalize(records)
+    # Второй проход bind: args из event.original поднимаются в _os_normalize,
+    # но format_sql_fields в ядре уже отработал до этого → нужно добинить здесь.
+    # enabled=False: SQL уже отформатирован, только замена $N → значение.
+    if req.options.bind_sql_args:
+        records = [_format_sql_fields(r, enabled=False, bind_args=True) for r in records]
 
     total = len(records)
     truncated = False

@@ -16,7 +16,7 @@ import os
 import sys
 from pathlib import Path
 
-__version__ = "0.9.8"
+__version__ = "0.9.10"
 
 
 def _find_core_root() -> Path | None:
