@@ -284,7 +284,8 @@ async function doParse() {
   const files = state.session.files;
   if (files.length === 0) { setFooter("Нет данных: добавьте файл или вставьте текст."); return; }
 
-  obs.action("parse_clicked", { files: files.length, levels: collectOptions().log_levels });
+  const _opts = collectOptions();
+  obs.action("parse_clicked", { files: files.length, levels: _opts.log_levels, bind_sql_args: _opts.bind_sql_args });
   $("parseBtn").disabled = true;
   $("parseBtn").classList.add("loading");
   showProgress(0);
