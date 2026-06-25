@@ -51,8 +51,7 @@
     const cache = new WeakMap();
     return function (rec) {
       if (rec == null || typeof rec !== "object") return fn(rec);
-      const hit = cache.get(rec);
-      if (hit !== undefined) return hit;
+      if (cache.has(rec)) return cache.get(rec);   // has(): не теряем закешированный undefined/""
       const v = fn(rec);
       cache.set(rec, v);
       return v;
@@ -135,6 +134,20 @@
     }
     return "";
   });
+
+  // Свёртка семиуровневой шкалы levelOf к пяти бакетам UI (плитки/счётчики/фильтр/
+  // цвет строки). FATAL/CRITICAL — это «хуже ERROR», поэтому считаем и красим их как
+  // ERROR; TRACE — детальнее DEBUG. Запись без уровня → OTHER. Без этой свёртки
+  // FATAL/CRITICAL/TRACE проваливались мимо всех пяти плиток: счётчики недосчитывали
+  // самые тяжёлые события, а фильтр уровней их вообще не ловил. Текстовую метку (сам
+  // «FATAL») UI показывает отдельно — здесь только корзина для цвета/счёта/фильтра.
+  const LEVEL_BUCKET = {
+    FATAL: "ERROR", CRITICAL: "ERROR", ERROR: "ERROR",
+    WARN: "WARN", INFO: "INFO", DEBUG: "DEBUG", TRACE: "DEBUG",
+  };
+  function bucketOf(rec) {
+    return LEVEL_BUCKET[levelOf(rec)] || "OTHER";
+  }
 
   function fieldOf(rec, keys) {
     for (const k of keys) {
@@ -377,7 +390,7 @@
 
   return {
     LEVEL_RE, TEXT_KEYS, TS_KEYS, SRC_KEYS, REQ_KEYS,
-    norm, levelOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, summaryOf, sqlOf, sqlSnippetOf, fmtNanos, recordToLine,
+    norm, levelOf, bucketOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, summaryOf, sqlOf, sqlSnippetOf, fmtNanos, recordToLine,
     buildQuery, isEmptyQuery, matchesQuery, highlightSegments, crossContext,
   };
 });
