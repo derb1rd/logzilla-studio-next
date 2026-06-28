@@ -445,6 +445,28 @@ function updateLevelCounts() {
   for (const lvl of Object.keys(counts)) $("cnt-" + lvl).textContent = ru(counts[lvl]);
 }
 
+// Обновляет счётчики плиток уровней и источников с учётом активных фильтров.
+// Уровни считаются из записей, прошедших фильтр источников+поиска (без фильтра уровней),
+// источники — из записей, прошедших фильтр уровней+поиска (без фильтра источников).
+function _refreshFilterCounts(off, offSrc, q, noQuery) {
+  const lvlCounts = { ERROR: 0, WARN: 0, INFO: 0, DEBUG: 0, OTHER: 0 };
+  const srcCounts = {};
+  for (const rec of state.records) {
+    const effectiveLvl = levelOf(rec) || "OTHER";
+    const src = sourceOf(rec);
+    const passesQuery = noQuery || matchesQuery(rec, q);
+    if (passesQuery && (offSrc.size === 0 || !offSrc.has(src)) && effectiveLvl in lvlCounts)
+      lvlCounts[effectiveLvl]++;
+    if (passesQuery && !off.has(effectiveLvl))
+      srcCounts[src] = (srcCounts[src] || 0) + 1;
+  }
+  for (const lvl of Object.keys(lvlCounts)) $("cnt-" + lvl).textContent = ru(lvlCounts[lvl]);
+  document.querySelectorAll(".src-cb").forEach((cb) => {
+    const cntEl = cb.parentElement?.querySelector(".src-count");
+    if (cntEl) cntEl.textContent = ru(srcCounts[cb.value] || 0);
+  });
+}
+
 // Синхронизирует визуальное состояние плиток уровней с чекбоксами (.off = выкл).
 function syncLevelTiles() {
   document.querySelectorAll(".lvl-tile").forEach((tile) => {
@@ -544,6 +566,7 @@ function applySearch() {
   // пересчитываем. Если запись выпала из выборки — индекс -1 (подсветки в потоке
   // нет), но инспектор продолжает показывать её с пометкой «скрыта фильтром».
   state.selected = state.selectedRec ? state.view.indexOf(state.selectedRec) : -1;
+  _refreshFilterCounts(off, offSrc, q, noQuery);
   renderStream();
   renderInspector();
 }
