@@ -352,6 +352,26 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
 .ctx-row .c-n { color: var(--subtle); text-align: right; }
 .ctx-row .c-ts { color: var(--muted); white-space: nowrap; }
 
+/* строки вкладки «Закладки»: тот же грид, что у контекста, + колонка для ✕ */
+.mark-row { grid-template-columns: 44px 50px 1fr auto; }
+.mark-row.xfile { grid-template-columns: 38px 76px 46px 1fr auto; }
+.mark-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mark-del {
+  background: transparent; border: 0; color: var(--subtle); padding: 0 2px;
+  font-size: 11px; opacity: 0; cursor: pointer; line-height: 1; align-self: center;
+}
+.mark-row:hover .mark-del { opacity: 1; }
+.mark-del:hover { color: var(--error); }
+
+/* ★ в шапке инспектора — тоггл закладки текущей записи (см. также клавиша B) */
+.insp-star {
+  margin-left: auto; background: transparent; border: 0; cursor: pointer;
+  font-size: 15px; line-height: 1; padding: 0 2px; color: var(--subtle);
+}
+.insp-star:hover { color: var(--accent); }
+.insp-star.on { color: var(--accent); }
+.insp-hidden + .insp-star { margin-left: 6px; }   /* «скрыта фильтром» держит auto-отступ */
+
 .histo { margin-top: 14px; padding: 10px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); }
 .histo-label { font-size: 10px; color: var(--subtle); letter-spacing: 0.8px; margin-bottom: 8px; text-transform: uppercase; font-weight: 700; }
 .histo-bars { display: flex; align-items: flex-end; gap: 3px; height: 36px; }
@@ -483,6 +503,9 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
     background: var(--surface-2); color: var(--muted); font-size: var(--fs-sm);
   }
   .insp-close:hover { color: var(--text); border-color: var(--border-hi); }
+  /* в drawer-режиме круглая ✕ висит в правом верхнем углу — освобождаем место,
+     чтобы ★-тоггл закладки из insp-meta не уезжал под неё */
+  .insp-meta { padding-right: 30px; }
 }
 
 /* < 760px — узкие экраны: ужимаем левую колонку и прячем подсказку ⌘K. */

@@ -135,6 +135,7 @@
       <div class="insp-tabs" id="inspTabs" hidden>
         <span class="tab active" data-tab="struct">Структура</span>
         <span class="tab" data-tab="context">Контекст</span>
+        <span class="tab" data-tab="marks" id="tabMarks">Закладки</span>
       </div>
       <div class="insp-body" id="inspBody"></div>
 
@@ -142,6 +143,7 @@
         <select id="exportScope" class="export-scope" title="Что экспортировать">
           <option value="active">активный файл</option>
           <option value="all" selected>все файлы (по отдельности)</option>
+          <option value="bookmarks">только закладки</option>
         </select>
         <label class="check" title="NDJSON — по одному JSON-объекту на строку"><input type="checkbox" id="ndjson"> NDJSON</label>
         <label class="check" title="Вложенные объекты → плоские поля через точку (a.b.c)"><input type="checkbox" id="flatten"> Плоская структура</label>

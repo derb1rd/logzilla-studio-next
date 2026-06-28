@@ -31,6 +31,12 @@ const state = {
   queryTerms: [],      // текстовые термины поиска (для подсветки в строках)
   activeTab: "struct",
   totalLines: 0,
+  // Закладки — ручной контекст: пользователь сам отмечает записи (★ / клавиша B),
+  // они собираются в 3-ю вкладку инспектора единым плоским списком и могут быть
+  // выгружены отдельно. Cross-file: храним {fileId, rec} в порядке добавления.
+  // Session-only: объекты записей пересоздаются прогоном, поэтому закладки
+  // сбрасываются при ре-парсе/очистке (и чистятся при удалении файла-источника).
+  bookmarks: [],
 };
 
 let _seq = 0;
@@ -185,6 +191,7 @@ function clearSession() {
   state.session.files = [];
   state.session.activeId = null;
   state.selectedRec = null; state.selected = -1; state.contextAnchor = null;
+  state.bookmarks = [];
   obs.action("session_clear", {});
   renderTree();
   renderActive();
@@ -195,6 +202,8 @@ function removeEntry(id) {
   const i = state.session.files.findIndex((f) => f.id === id);
   if (i < 0) return;
   state.session.files.splice(i, 1);
+  // Записи удалённого файла больше не существуют — снимаем их закладки.
+  state.bookmarks = state.bookmarks.filter((b) => b.fileId !== id);
   if (state.session.activeId === id) {
     const next = state.session.files[i] || state.session.files[i - 1] || null;
     state.session.activeId = next ? next.id : null;
@@ -290,8 +299,10 @@ async function doParse() {
   $("parseBtn").classList.add("loading");
   showProgress(0);
   setFooter(`Парсинг… (0/${files.length})`);
-  // Записи устаревают: их объекты пересоздаются прогоном.
+  // Записи устаревают: их объекты пересоздаются прогоном. Закладки держат ссылки
+  // на старые объекты записей → после ре-парса они «висячие». Session-only: сброс.
   state.selectedRec = null; state.selected = -1; state.contextAnchor = null;
+  state.bookmarks = [];
   let _parseDone = 0;
   try {
     await runPool(files, 3, async (entry) => {
@@ -789,6 +800,46 @@ function moveSelection(delta) {
   selectRow(i);
 }
 
+// --- закладки (ручной контекст) ---------------------------------------------
+// id файла-владельца записи: ищем по всем файлам сессии (cross-file). Нужен,
+// чтобы строки закладок были кликабельны через тот же bindCtxRows (data-fid/ri).
+function fileIdOf(rec) {
+  const f = state.session.files.find((x) => x.records && x.records.includes(rec));
+  return f ? f.id : null;
+}
+
+const isBookmarked = (rec) => state.bookmarks.some((b) => b.rec === rec);
+
+// Переключить закладку для записи. Идентичность — по объекту записи (как и весь
+// выбор в приложении). Возвращает новое состояние (true = добавлена).
+function toggleBookmark(rec) {
+  if (!rec) return false;
+  const i = state.bookmarks.findIndex((b) => b.rec === rec);
+  if (i >= 0) {
+    state.bookmarks.splice(i, 1);
+    obs.action("bookmark_remove", { count: state.bookmarks.length });
+    return false;
+  }
+  state.bookmarks.push({ fileId: fileIdOf(rec) || state.session.activeId, rec });
+  obs.action("bookmark_add", { count: state.bookmarks.length });
+  return true;
+}
+
+// Тоггл закладки для текущей записи инспектора (★-кнопка / клавиша B).
+function toggleBookmarkSelected() {
+  if (!state.selectedRec) return;
+  toggleBookmark(state.selectedRec);
+  renderInspector();   // обновит ★-кнопку, счётчик вкладки и (если открыта) список
+}
+
+// Счётчик в ярлыке вкладки: «Закладки» / «Закладки · N».
+function updateBookmarkTab() {
+  const tab = $("tabMarks");
+  if (!tab) return;
+  const n = state.bookmarks.length;
+  tab.textContent = n ? `Закладки · ${n}` : "Закладки";
+}
+
 // --- инспектор (право) ------------------------------------------------------
 // Экранируем и кавычки: summaryHtml/contextHtml вставляют значения в HTML-атрибуты
 // (data-rid, title), а они приходят из содержимого логов (req_id) и имён файлов.
@@ -804,6 +855,7 @@ function renderInspector() {
   const body = $("inspBody");
   const rec = state.selectedRec;
   document.body.classList.toggle("inspect", !!rec);   // drawer-режим на узких экранах
+  updateBookmarkTab();
   if (!rec) {
     head.innerHTML = `<div class="insp-empty">${emptyState("Запись не выбрана", "Выберите строку в потоке, чтобы раскрыть её.")}</div>`;
     tabs.hidden = true;
@@ -820,16 +872,24 @@ function renderInspector() {
   const reqChip = rid
     ? `<span class="req-chip" data-rid="${escapeHtml(rid)}" title="Показать в потоке только запрос ${escapeHtml(rid)}">req ${escapeHtml(rid)}</span>`
     : "";
+  const marked = isBookmarked(rec);
+  const starBtn =
+    `<button class="insp-star${marked ? " on" : ""}" id="inspStar" ` +
+    `title="${marked ? "Убрать из закладок (B)" : "В закладки (B)"}" ` +
+    `aria-pressed="${marked}">${marked ? "★" : "☆"}</button>`;
   head.innerHTML =
     `<div class="insp-meta">` +
     `<span class="insp-badge ${bucketOf(rec)}">${lvl}</span>` +
     `<span class="insp-id">#${ri + 1} · ${escapeHtml(tsOf(rec) || "—")}</span>` +
     reqChip +
     hidden +
+    starBtn +
     `</div>` +
     `<div class="insp-title">${summaryHtml(rec)}</div>`;
   const chipEl = head.querySelector(".req-chip");
   if (chipEl) chipEl.addEventListener("click", () => pivotToReq(chipEl.dataset.rid));
+  const starEl = head.querySelector("#inspStar");
+  if (starEl) starEl.addEventListener("click", toggleBookmarkSelected);
   tabs.hidden = false;
   renderTab();
 }
@@ -849,10 +909,64 @@ function renderTab() {
   if (!rec) { body.innerHTML = ""; return; }
   if (state.activeTab === "struct") {
     body.innerHTML = sqlBlockHtml(rec) + tracebackBlockHtml(rec) + jsonHtml(rec) + histoHtml();
+  } else if (state.activeTab === "marks") {
+    body.innerHTML = bookmarksHtml();
+    bindBookmarkRows();
   } else {
     body.innerHTML = contextHtml();
     bindCtxRows();
   }
+}
+
+// Вкладка «Закладки» — плоский список вручную отмеченных записей по всей сессии
+// (в порядке добавления), в том же визуальном ключе, что и «Контекст». Кликабельны
+// (выбор записи, при необходимости — переключение файла); ✕ убирает из закладок.
+function bookmarksHtml() {
+  if (!state.bookmarks.length) {
+    return `<div class="insp-empty">` +
+      emptyState("Закладок нет",
+        "Откройте запись и нажмите ★ (или клавишу B), чтобы собрать ручной контекст. " +
+        "Закладки можно выгрузить отдельно: «только закладки» в панели экспорта.") +
+      `</div>`;
+  }
+  const nFiles = new Set(state.bookmarks.map((b) => b.fileId)).size;
+  const multi = nFiles > 1;
+  const label = `${ru(state.bookmarks.length)} закладок` + (multi ? ` · ${nFiles} файла` : "");
+  let html = `<div class="histo-label">${label}</div>`;
+  state.bookmarks.forEach((b, n) => {
+    const f = state.session.files.find((x) => x.id === b.fileId);
+    const i = f ? f.records.indexOf(b.rec) : -1;
+    const center = b.rec === state.selectedRec ? " center" : "";
+    const fileBadge = multi && f ? `<span class="ctx-file" title="${escapeHtml(f.name)}">${escapeHtml(shortName(f.name))}</span>` : "";
+    html += `<div class="ctx-row mark-row${multi ? " xfile" : ""}${center}" data-fid="${b.fileId}" data-ri="${i}" data-bn="${n}">` +
+      `<span class="c-n">${i >= 0 ? i + 1 : "—"}</span>` +
+      fileBadge +
+      `<span class="r-lvl ${bucketOf(b.rec)}">${levelOf(b.rec) || "OTHER"}</span>` +
+      `<span class="mark-msg">${summaryHtml(b.rec)}</span>` +
+      `<button class="mark-del" data-bn="${n}" title="Убрать из закладок">✕</button></div>`;
+  });
+  return html;
+}
+
+// Клик по строке закладки → выбор записи (cross-file через selectRecordIn);
+// клик по ✕ убирает из закладок, не открывая запись (stopPropagation).
+function bindBookmarkRows() {
+  const body = $("inspBody");
+  body.querySelectorAll(".mark-del").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const n = +btn.dataset.bn;
+      if (n >= 0 && n < state.bookmarks.length) state.bookmarks.splice(n, 1);
+      obs.action("bookmark_remove", { count: state.bookmarks.length });
+      renderInspector();   // перерисует список и счётчик (activeTab остаётся marks)
+    });
+  });
+  body.querySelectorAll(".mark-row[data-fid]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const b = state.bookmarks[+el.dataset.bn];
+      if (b) selectRecordIn(b.fileId, b.rec);
+    });
+  });
 }
 
 // Делает строки контекста кликабельными → выбор той же записи (с учётом
@@ -1020,6 +1134,7 @@ function histoHtml() {
 // --- экспорт ----------------------------------------------------------------
 async function doExport() {
   if ($("exportScope").value === "all") return doExportAll();
+  if ($("exportScope").value === "bookmarks") return doExportBookmarks();
   const entry = activeEntry();
   if (!entry || !entry.request) { setFooter("Сначала выполните парсинг."); return; }
   const ndjson = $("ndjson").checked;
@@ -1164,6 +1279,23 @@ async function doExportAll() {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Экспорт ТОЛЬКО закладок — клиентский, как и «только видимые»: серверный
+// /api/export перепарсивает файл и о ручном выборе не знает, поэтому сериализуем
+// сами объекты отмеченных записей через тот же _serializeFiltered (флаги NDJSON и
+// «Плоская структура» учтены). Закладки cross-file → берём из state.bookmarks.
+function doExportBookmarks() {
+  if (!state.bookmarks.length) { setFooter("Нет закладок для экспорта."); return; }
+  const ndjson = $("ndjson").checked;
+  const flatten = $("flatten").checked;
+  const records = state.bookmarks.map((b) => b.rec);
+  const ext = ndjson ? "ndjson" : "json";
+  const mime = ndjson ? "application/x-ndjson" : "application/json";
+  const name = `bookmarks_${exportTs()}.${ext}`;
+  obs.action("export_bookmarks", { records: records.length, ndjson, flatten });
+  downloadBlob(new Blob([_serializeFiltered(records, ndjson, flatten)], { type: mime }), name);
+  setFooter(`Экспортировано закладок: ${ru(records.length)} → ${name}`);
+}
 
 // --- клиентская сериализация для «только видимые» ----------------------------
 function _flattenRec(obj, prefix = "", sep = ".") {
@@ -1316,6 +1448,7 @@ function wireUp() {
     if (typing) return;                         // не мешаем вводу
     if (e.key === "ArrowDown") { e.preventDefault(); moveSelection(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); moveSelection(-1); }
+    else if (e.key.toLowerCase() === "b" && state.selectedRec) { e.preventDefault(); toggleBookmarkSelected(); }
   });
 
   document.querySelectorAll(".lvl").forEach((c) =>
