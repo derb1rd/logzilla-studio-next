@@ -40,6 +40,24 @@
 
   const norm = (s) => (s.toUpperCase() === "WARNING" ? "WARN" : s.toUpperCase());
 
+  // Мемоизация по объекту записи. Извлечение полей (levelOf/sourceOf/reqIdOf/tsOf/
+  // httpCtxOf) — чистые функции от записи, но их гоняют десятки раз за пасс: фильтр
+  // потока, счётчики уровней, панель источников, гистограмма, cross-file контекст,
+  // рендер строк. На окне без фильтров (до PREVIEW_MAX) это превращалось в фриз —
+  // каждое ↑/↓ в инспекторе = два полных прохода с регэкспами. Записи — стабильные
+  // объекты (живут в state.records / file.records), поэтому кешируем по ссылке через
+  // WeakMap: повторный вызов на той же записи — O(1), кеш сам собирается GC.
+  function memoize(fn) {
+    const cache = new WeakMap();
+    return function (rec) {
+      if (rec == null || typeof rec !== "object") return fn(rec);
+      if (cache.has(rec)) return cache.get(rec);   // has(): не теряем закешированный undefined/""
+      const v = fn(rec);
+      cache.set(rec, v);
+      return v;
+    };
+  }
+
   // Значение поля → однострочное представление: объекты сериализуем, у строк
   // схлопываем любые пробелы/переносы. Нужен, чтобы многострочный (отформатированный
   // ядром) SQL/JSON не рвал однострочный предпросмотр в потоке и шапке инспектора.
@@ -96,7 +114,7 @@
       .map((k) => k.toLowerCase()),
   );
 
-  function levelOf(record) {
+  const levelOf = memoize(function (record) {
     if (record == null || typeof record !== "object") return "";
     for (const k of LEVEL_KEYS) {
       const v = record[k];
@@ -115,6 +133,20 @@
       }
     }
     return "";
+  });
+
+  // Свёртка семиуровневой шкалы levelOf к пяти бакетам UI (плитки/счётчики/фильтр/
+  // цвет строки). FATAL/CRITICAL — это «хуже ERROR», поэтому считаем и красим их как
+  // ERROR; TRACE — детальнее DEBUG. Запись без уровня → OTHER. Без этой свёртки
+  // FATAL/CRITICAL/TRACE проваливались мимо всех пяти плиток: счётчики недосчитывали
+  // самые тяжёлые события, а фильтр уровней их вообще не ловил. Текстовую метку (сам
+  // «FATAL») UI показывает отдельно — здесь только корзина для цвета/счёта/фильтра.
+  const LEVEL_BUCKET = {
+    FATAL: "ERROR", CRITICAL: "ERROR", ERROR: "ERROR",
+    WARN: "WARN", INFO: "INFO", DEBUG: "DEBUG", TRACE: "DEBUG",
+  };
+  function bucketOf(rec) {
+    return LEVEL_BUCKET[levelOf(rec)] || "OTHER";
   }
 
   function fieldOf(rec, keys) {
@@ -137,7 +169,7 @@
   }
 
   const ISO_TS_RE = /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/;
-  function tsOf(rec) {
+  const tsOf = memoize(function (rec) {
     // Среди полей-кандидатов предпочитаем ISO-8601 (машинное время СОБЫТИЯ —
     // сортируемое и однозначное) человекочитаемым строкам вроде «Jun 5, 2026 @ …»:
     // в Kibana-экспортах @timestamp — это время приёма (батчами), а реальное время
@@ -155,12 +187,12 @@
     // выжимаем HH:MM:SS(.ms) если есть — компактнее для колонки
     const m = t.match(/\d{2}:\d{2}:\d{2}(?:[.,]\d{1,3})?/);
     return m ? m[0] : t.slice(0, 12);
-  }
+  });
 
   // Источник/компонент записи. Сначала — структурное поле (JSON/CSV). Для plain-text
   // поля source нет, поэтому вытаскиваем «вызываемый» компонент: токен сразу после
   // уровня (`… ERROR api-gateway …` → api-gateway). HTTP-глаголы и пути отбрасываем.
-  function sourceOf(rec) {
+  const sourceOf = memoize(function (rec) {
     const s = fieldOf(rec, SRC_KEYS);
     if (s) return s;
     const raw = fieldOf(rec, TEXT_KEYS);
@@ -170,11 +202,11 @@
     const tok = raw.slice(m.index + m[0].length).trim().split(/\s+/)[0] || "";
     if (!/^[A-Za-z][\w.\-]{1,30}$/.test(tok) || HTTP_VERB.test(tok)) return "";
     return tok;
-  }
+  });
 
   // Идентификатор запроса/трассы — ось «контекста». Структурное поле или вытяжка
   // из текста (`req_id=...`, `trace_id: ...`, `correlation_id ...`).
-  function reqIdOf(rec) {
+  const reqIdOf = memoize(function (rec) {
     for (const k of REQ_KEYS) {
       const v = rec[k];
       if (v != null && v !== "") return String(v);
@@ -185,9 +217,9 @@
       if (m) return m[1];
     }
     return "";
-  }
+  });
 
-  function msgOf(rec) {
+  const msgOf = memoize(function (rec) {
     for (const k of TEXT_KEYS) {
       if (typeof rec[k] === "string") return rec[k];
     }
@@ -201,7 +233,7 @@
       .filter(([k]) => k !== "_meta" && !/^col_\d+$/.test(k) && !CONSUMED_KEYS.has(k.toLowerCase()))
       .map(([k, v]) => `${k}=${flatVal(v)}`)
       .join(" · ");
-  }
+  });
 
   // Наносекунды → компактная человекочитаемая длительность (µs/ms/s/min).
   function fmtNanos(v) {
@@ -220,7 +252,7 @@
   // k=v — тогда контекст уже внутри base, и поля гасятся проверкой inBase. Возвращает
   // строковые поля (или "") + сам base — основа и для строки (summaryOf), и для
   // цветных чипов в UI.
-  function httpCtxOf(rec) {
+  const httpCtxOf = memoize(function (rec) {
     const base = msgOf(rec);
     const out = { base, method: "", url: "", status: "", dur: "", sql: "" };
     if (rec == null || typeof rec !== "object") return out;
@@ -246,7 +278,7 @@
       if (rec[k] != null && rec[k] !== "") { out.dur = fmtNanos(rec[k]); break; }
     }
     return out;
-  }
+  });
 
   // «Обогащённый» предпросмотр одной строкой (для свободного поиска через recordToLine
   // и текстовых контекстов). Цветной рендер строит UI из тех же полей httpCtxOf.
@@ -358,7 +390,7 @@
 
   return {
     LEVEL_RE, TEXT_KEYS, TS_KEYS, SRC_KEYS, REQ_KEYS,
-    norm, levelOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, summaryOf, sqlOf, sqlSnippetOf, fmtNanos, recordToLine,
+    norm, levelOf, bucketOf, fieldOf, tsOf, sourceOf, reqIdOf, msgOf, httpCtxOf, summaryOf, sqlOf, sqlSnippetOf, fmtNanos, recordToLine,
     buildQuery, isEmptyQuery, matchesQuery, highlightSegments, crossContext,
   };
 });

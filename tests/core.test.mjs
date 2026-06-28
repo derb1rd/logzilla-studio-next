@@ -37,6 +37,20 @@ test("levelOf: числовой уровень/severity (syslog/GELF/pino)", () 
   assert.equal(LZ.levelOf({ level: "ERROR", severity: 6 }), "ERROR");
 });
 
+test("bucketOf: семь уровней → пять корзин UI (плитки/счётчики/фильтр)", () => {
+  // FATAL/CRITICAL «хуже ERROR» — в корзину ERROR; TRACE детальнее DEBUG.
+  assert.equal(LZ.bucketOf({ level: "fatal" }), "ERROR");
+  assert.equal(LZ.bucketOf({ severity: 2 }), "ERROR");            // syslog CRITICAL
+  assert.equal(LZ.bucketOf({ level: 60 }), "ERROR");             // pino FATAL
+  assert.equal(LZ.bucketOf({ level: "error" }), "ERROR");
+  assert.equal(LZ.bucketOf({ level: "warn" }), "WARN");
+  assert.equal(LZ.bucketOf({ level: "info" }), "INFO");
+  assert.equal(LZ.bucketOf({ level: 10 }), "DEBUG");            // pino TRACE → DEBUG
+  assert.equal(LZ.bucketOf({ level: "debug" }), "DEBUG");
+  assert.equal(LZ.bucketOf({ message: "no level" }), "OTHER");   // нет уровня → OTHER
+  assert.equal(LZ.bucketOf(null), "OTHER");                      // не падает
+});
+
 test("sourceOf: поле, компонент из текста, отброс HTTP-глаголов", () => {
   assert.equal(LZ.sourceOf({ service: "api" }), "api");
   assert.equal(LZ.sourceOf({ service_name: "drills" }), "drills");  // ECS/zap-поле
