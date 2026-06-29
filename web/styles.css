@@ -217,7 +217,7 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline-offset
 
 /* CENTER — log stream */
 .stream-head, .stream-row {
-  display: grid; grid-template-columns: 56px 96px 56px 132px 1fr;
+  display: grid; grid-template-columns: 14px 56px 96px 56px 132px 1fr;
   gap: 12px; padding: 5px 16px; align-items: center;
 }
 /* строки потока выравниваем по верху — длинный message переносится на
@@ -241,6 +241,13 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline-offset
 .stream-row.lvl-WARN  { background: rgba(255,195,92,0.05); }
 .stream-row.lvl-INFO  { background: rgba(109,208,255,0.04); }
 .stream-row.selected  { background: var(--surface-hi); border-left-color: var(--accent); }
+/* gutter-маркер закладки: прозрачный → виден на hover строки → accent если закладка */
+.stream-row .r-bm {
+  font-size: 11px; text-align: center; color: transparent; user-select: none;
+  cursor: pointer; transition: color var(--t-fast) var(--ease);
+}
+.stream-row:hover .r-bm       { color: var(--subtle); }
+.stream-row.bookmarked .r-bm  { color: var(--accent); }
 .stream-row .r-n   { color: var(--subtle); text-align: right; }
 .stream-row.selected .r-n { color: var(--accent); font-weight: 700; }
 .stream-row .r-ts  { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -324,7 +331,7 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
 .req-chip:hover { background: rgba(198,157,255,0.22); }
 .insp-title { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); line-height: 1.5; word-break: break-word; }
 
-.insp-tabs { display: flex; padding: 8px 14px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.insp-tabs { display: flex; align-items: flex-end; padding: 8px 14px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .insp-tabs .tab {
   font-size: var(--fs-sm); padding: 6px 10px; color: var(--muted); cursor: pointer;
   border-bottom: 2px solid transparent; font-weight: 500;
@@ -363,14 +370,17 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
 .mark-row:hover .mark-del { opacity: 1; }
 .mark-del:hover { color: var(--error); }
 
-/* ★ в шапке инспектора — тоггл закладки текущей записи (см. также клавиша B) */
-.insp-star {
-  margin-left: auto; background: transparent; border: 0; cursor: pointer;
-  font-size: 15px; line-height: 1; padding: 0 2px; color: var(--subtle);
+/* pill-кнопка «В закладки» / «Убрать» в баре вкладок инспектора */
+.bm-pill {
+  margin-left: auto; margin-bottom: 4px; align-self: center;
+  padding: 3px 11px; border-radius: 20px;
+  border: 1px solid var(--border-hi); background: transparent;
+  color: var(--muted); cursor: pointer; white-space: nowrap;
+  font-size: var(--fs-xs); font-family: var(--mono);
+  transition: color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
 }
-.insp-star:hover { color: var(--accent); }
-.insp-star.on { color: var(--accent); }
-.insp-hidden + .insp-star { margin-left: 6px; }   /* «скрыта фильтром» держит auto-отступ */
+.bm-pill:hover { color: var(--accent); border-color: var(--accent); }
+.bm-pill.on    { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
 .histo { margin-top: 14px; padding: 10px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); }
 .histo-label { font-size: 10px; color: var(--subtle); letter-spacing: 0.8px; margin-bottom: 8px; text-transform: uppercase; font-weight: 700; }
