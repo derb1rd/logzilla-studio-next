@@ -297,6 +297,7 @@ async function doParse() {
   obs.action("parse_clicked", { files: files.length, levels: _opts.log_levels, bind_sql_args: _opts.bind_sql_args });
   $("parseBtn").disabled = true;
   $("parseBtn").classList.add("loading");
+  $("stream").setAttribute("aria-busy", "true");
   showProgress(0);
   setFooter(`Парсинг… (0/${files.length})`);
   // Записи устаревают: их объекты пересоздаются прогоном. Закладки держат ссылки
@@ -314,6 +315,7 @@ async function doParse() {
   } finally {
     $("parseBtn").disabled = false;
     $("parseBtn").classList.remove("loading");
+    $("stream").setAttribute("aria-busy", "false");
     hideProgress();
   }
   renderActive();
@@ -515,6 +517,7 @@ function _makeStreamRow(rec, i) {
     (i === state.selected ? " selected" : "") +
     (bm ? " bookmarked" : "");
   row.dataset.idx = i;
+  row.setAttribute("role", "listitem");
   const cell = (cls, txt) => { const s = document.createElement("span"); s.className = cls; s.textContent = txt; return s; };
 
   // gutter: ★ прозрачная → видна при hover → accent при закладке; клик = тоггл без выбора

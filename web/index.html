@@ -37,19 +37,20 @@
     </div>
 
     <div class="searchbar">
-      <span class="search-ico">⌕</span>
-      <input type="search" id="search" placeholder="фильтр: текст · lvl:ERROR · src:api · req:7f3a">
-      <span class="kbd">⌘K</span>
+      <span class="search-ico" aria-hidden="true">⌕</span>
+      <input type="search" id="search" aria-label="Фильтр потока логов"
+             placeholder="фильтр: текст · lvl:ERROR · src:api · req:7f3a">
+      <span class="kbd" aria-hidden="true">⌘K</span>
     </div>
 
-    <div class="status" id="health">● подключение…</div>
+    <div class="status" id="health" role="status" aria-live="polite">● подключение…</div>
   </header>
 
   <!-- MAIN — 3 panes -->
   <main class="panes">
 
     <!-- LEFT — источник + сохранённые фильтры -->
-    <aside class="pane pane-left">
+    <aside class="pane pane-left" role="region" aria-label="Источник и фильтры">
       <div class="group-label">ИСТОЧНИК · сессия</div>
       <div id="dropzone" class="dropzone">
         <p>Перетащите логи сюда<br>или нажмите для выбора</p>
@@ -101,7 +102,7 @@
     </aside>
 
     <!-- CENTER — поток логов -->
-    <section class="pane pane-center">
+    <section class="pane pane-center" role="region" aria-label="Поток логов">
       <div class="stream-head">
         <span class="col-bm"></span>
         <span class="col-n">#</span>
@@ -110,7 +111,7 @@
         <span class="col-src">SOURCE</span>
         <span class="col-msg">MESSAGE</span>
       </div>
-      <div id="stream" class="stream">
+      <div id="stream" class="stream" role="list" aria-label="Записи лога" aria-busy="false">
         <div class="stream-empty">Загрузите файл или вставьте текст, затем «Парсить».</div>
       </div>
       <div class="stream-toolbar" id="streamToolbar">
@@ -128,7 +129,7 @@
     <div class="insp-backdrop" id="inspBackdrop"></div>
 
     <!-- RIGHT — inspector -->
-    <aside class="pane pane-right">
+    <aside class="pane pane-right" role="region" aria-label="Инспектор записи">
       <button class="insp-close" id="inspClose" title="Закрыть (Esc)">✕</button>
       <div class="insp-head" id="inspHead">
         <div class="insp-empty">Выберите строку в потоке, чтобы раскрыть запись.</div>
@@ -155,12 +156,13 @@
     </aside>
   </main>
 
-  <div id="progressBar" class="progress-bar" hidden>
+  <div id="progressBar" class="progress-bar" hidden role="progressbar"
+       aria-label="Прогресс операции" aria-valuemin="0" aria-valuemax="100">
     <div id="progressFill" class="progress-fill"></div>
   </div>
 
   <footer class="footer">
-    <span id="footer-status">Готов к работе</span>
+    <span id="footer-status" role="status" aria-live="polite">Готов к работе</span>
     <a href="#" id="dumplog" class="dumplog" title="Скачать журнал действий для отладки (в т.ч. с ИИ)">⛏ action log</a>
   </footer>
 
