@@ -1,15 +1,16 @@
 # CLAUDE.md — правила для Claude Code
 
-## Рабочий процесс
-
-**Репо ведётся на GitHub: `derb1rd/logzilla-studio-next`.**
-
-Все операции с файлами — только через `gh`:
-- Читать: `gh api "repos/derb1rd/logzilla-studio-next/contents/<path>" -q ".content" | base64 -d`
-- Писать/коммитить: `gh api "repos/derb1rd/logzilla-studio-next/contents/<path>" -X PUT -f message="..." -f sha="<sha>" -f content="<base64>"`
-- Создавать PR: `gh pr create` или `gh api`
-
-Локальная папка **не используется**. Никаких `Read`, `Edit`, `Write` на локальный диск для файлов проекта.
+> **СТОП. Прочитай это до любых действий.**
+>
+> Этот проект живёт **только на GitHub**: `derb1rd/logzilla-studio-next`.
+> Локальная папка — не источник истины. Не смотри в неё, не читай оттуда файлы.
+>
+> **Всё через `gh`:**
+> - Читать файл: `gh api "repos/derb1rd/logzilla-studio-next/contents/<path>" -q ".content" | base64 -d`
+> - Записать/закоммитить: `gh api "repos/derb1rd/logzilla-studio-next/contents/<path>" -X PUT -f message="..." -f sha="<sha>" -f content="<base64>"`
+> - PR: `gh pr create`
+>
+> Никаких `ls`, `cat`, `Read`, `Edit`, `Write` на локальный диск для файлов проекта.
 
 ---
 
