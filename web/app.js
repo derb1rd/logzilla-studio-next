@@ -1048,14 +1048,90 @@ const TB_KEYS = new Set(["traceback", "stacktrace"]);
 
 // pretty-print JSON с подсветкой; уровень окрашиваем по значению
 function jsonHtml(rec) {
-  const lines = ['<div class="json-line">{</div>'];
-  const entries = Object.entries(rec).filter(([k]) => !TB_KEYS.has(k));
+  return objHtml(rec, { skip: TB_KEYS });
+}
+
+// Рендер произвольного объекта как блока json-строк. Разделён с jsonHtml, чтобы
+// валидные/частично-восстановленные ВЛОЖЕННЫЕ объекты (см. valHtml) показывались
+// тем же визуальным языком, а не как stringify-блоб. opts: { skip, depth, partial }.
+function objHtml(obj, opts = {}) {
+  const { skip, depth = 0, partial = false } = opts;
+  const pad = 14 * (depth + 1);
+  const badge = partial
+    ? ` <span class="j-approx" title="Частичный разбор битого/неэкранированного JSON-экспорта — показано лучшее приближение, данные записи не изменены">≈ частично</span>`
+    : "";
+  const lines = [`<div class="json-line">{${badge}</div>`];
+  let entries = Object.entries(obj);
+  if (skip) entries = entries.filter(([k]) => !skip.has(k));
   entries.forEach(([k, v], idx) => {
     const comma = idx < entries.length - 1 ? "," : "";
-    lines.push(`<div class="json-line" style="padding-left:14px"><span class="j-key">"${escapeHtml(k)}"</span>: ${valHtml(k, v)}${comma}</div>`);
+    lines.push(`<div class="json-line" style="padding-left:${pad}px"><span class="j-key">"${escapeHtml(k)}"</span>: ${valHtml(k, v, depth)}${comma}</div>`);
   });
-  lines.push('<div class="json-line">}</div>');
+  lines.push(`<div class="json-line"${depth ? ` style="padding-left:${14 * depth}px"` : ""}>}</div>`);
   return lines.join("");
+}
+
+// Лучшая попытка распарсить строку-JSON ДЛЯ ИНСПЕКТОРА (только показ; данные записи
+// не меняются и экспорт не трогается). Сначала строгий JSON.parse. Если строка —
+// битый/переэкранированный экспорт (LogZilla с неэкранированными `"` в значениях),
+// пробуем толерантный разбор верхнего уровня. Возвращает { obj, partial } или null.
+function looseParseJsonish(str) {
+  const s = String(str).trim();
+  if (s.length < 2 || (s[0] !== "{" && s[0] !== "[")) return null;
+  try { return { obj: JSON.parse(s), partial: false }; } catch (_) { /* битый — ниже */ }
+  if (s[0] !== "{") return null;          // толерантно разбираем только объекты
+  const obj = looseTopLevel(s);
+  return obj && Object.keys(obj).length ? { obj, partial: true } : null;
+}
+
+// Толерантный разбор верхнего уровня: пары "ключ":значение на глубине 1; значение
+// читаем до запятой верхнего уровня, за которой идёт `"ключ":`. Битые вложенные
+// значения остаются непрозрачной строкой, но соседние чистые поля восстанавливаются.
+function looseTopLevel(s) {
+  const end = s.lastIndexOf("}");
+  if (end < 1) return null;
+  const inner = s.slice(1, end);
+  const n = inner.length;
+  const out = {};
+  let i = 0;
+  const skipWs = (k) => { while (k < n && /\s/.test(inner[k])) k++; return k; };
+  while (i < n) {
+    i = skipWs(i);
+    if (i >= n || inner[i] !== '"') break;
+    let j = i + 1, key = "";
+    while (j < n) {
+      if (inner[j] === "\\" && j + 1 < n) { key += inner[j + 1]; j += 2; continue; }
+      if (inner[j] === '"') break;
+      key += inner[j++];
+    }
+    j = skipWs(j + 1);
+    if (j >= n || inner[j] !== ":") break;
+    j = skipWs(j + 1);
+    let depth = 0, inStr = false, esc = false;
+    const start = j;
+    for (; j < n; j++) {
+      const c = inner[j];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === '"') inStr = false;
+      } else if (c === '"') inStr = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") depth--;
+      else if (c === "," && depth <= 0) {
+        const look = skipWs(j + 1);
+        if (look < n && inner[look] === '"') break;
+      }
+    }
+    const raw = inner.slice(start, j).trim();
+    let val;
+    try { val = JSON.parse(raw); } catch (_) { val = raw; }
+    out[key] = val;
+    j = skipWs(j);
+    if (j < n && inner[j] === ",") j++;
+    i = j;
+  }
+  return out;
 }
 
 // Компактный рендер массива frames / sub_exceptions вместо JSON.stringify-blob.
@@ -1073,7 +1149,11 @@ function framesHtml(arr, key) {
   return `<div class="frames-list">[${items}]</div>`;
 }
 
-function valHtml(key, v) {
+// Глубина рекурсии вложенного раскрытия в инспекторе — страховка от циклов/
+// гигантских деревьев (битый экспорт может вкладывать JSON-в-JSON-в-JSON).
+const VAL_MAX_DEPTH = 4;
+
+function valHtml(key, v, depth = 0) {
   if (v === null) return '<span class="j-null">null</span>';
   if (typeof v === "boolean") return `<span class="j-bool">${v}</span>`;
   if (typeof v === "number") return `<span class="j-num">${v}</span>`;
@@ -1081,7 +1161,22 @@ function valHtml(key, v) {
     if (Array.isArray(v) && v.length && (key === "frames" || key === "sub_exceptions")) {
       return framesHtml(v, key);
     }
+    // Вложенный объект — раскрываем тем же языком, а не stringify-блобом.
+    if (!Array.isArray(v) && depth < VAL_MAX_DEPTH) {
+      return objHtml(v, { depth: depth + 1 });
+    }
     return `<span class="j-str">${escapeHtml(JSON.stringify(v))}</span>`;
+  }
+  // Строка может быть вложенным/битым JSON (event.original, source неэкранированного
+  // экспорта). Для ИНСПЕКТОРА пробуем раскрыть — данные записи при этом не меняются.
+  if (typeof v === "string" && depth < VAL_MAX_DEPTH) {
+    const t = v.trim();
+    if (t.length > 1 && t[0] === "{") {
+      const parsed = looseParseJsonish(t);
+      if (parsed && parsed.obj && typeof parsed.obj === "object" && !Array.isArray(parsed.obj)) {
+        return objHtml(parsed.obj, { depth: depth + 1, partial: parsed.partial });
+      }
+    }
   }
   // Схлопываем переносы внутри значения: компактная запись остаётся однострочной
   // (полную форму многострочного SQL показывает выделенный SQL-блок выше).

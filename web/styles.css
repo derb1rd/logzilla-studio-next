@@ -350,6 +350,8 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
 .j-null{ color: var(--subtle); }
 .j-lvl-ERROR { color: var(--error); } .j-lvl-WARN { color: var(--warn); }
 .j-lvl-INFO { color: var(--info); } .j-lvl-DEBUG { color: var(--debug); }
+/* пометка вложенного объекта, восстановленного толерантным разбором битого JSON */
+.j-approx { color: var(--warn); font-size: 11px; opacity: .8; cursor: help; }
 
 .ctx-row { display: grid; grid-template-columns: 44px 50px 1fr; gap: 8px; padding: 3px 6px; margin: 0 -6px; color: var(--code); border-radius: 4px; }
 .ctx-row[data-ri] { cursor: pointer; }
