@@ -24,6 +24,66 @@ from typing import Any, Optional
 # (0.5, 0.001) — легитимна и распознаётся _FLOAT_RE.
 _INT_RE = re.compile(r"[+-]?(?:0|[1-9]\d*)$")
 _FLOAT_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+
+
+def _fix_bare_quotes_in_json(s: str) -> str | None:
+    """Пытается экранировать голые `"` внутри JSON-строк (артефакт LogZilla-экспорта).
+
+    LogZilla не экранирует `"` в строковых значениях (error-message, url и т.п.),
+    поэтому после сборки payload json.loads падает на них. Проходим посимвольно:
+    внутри JSON-строки `"` → `\"`, если за ним НЕ следует JSON-разделитель.
+
+    Особый кейс `""` внутри строки: если за второй `"` стоит разделитель (`,}]:`),
+    то первая — голый символ (экранируем), вторая — настоящий закрыватель строки.
+    """
+    out: list[str] = []
+    in_string = False
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if in_string:
+            if ch == '\\' and i + 1 < n:
+                out.append(ch)
+                out.append(s[i + 1])
+                i += 2
+                continue
+            elif ch == '"':
+                if i + 1 < n and s[i + 1] == '"':
+                    # Смотрим что стоит после второй "
+                    j = i + 2
+                    while j < n and s[j] in ' \t\r\n':
+                        j += 1
+                    after2 = s[j] if j < n else ''
+                    if after2 in (',', '}', ']', ':'):
+                        # Первая " — голый символ в тексте, вторая — закрывает строку
+                        out += ['\\', '"', '"']
+                        in_string = False
+                    else:
+                        # Оба символа — голые, экранируем оба
+                        out += ['\\', '"', '\\', '"']
+                    i += 2
+                    continue
+                else:
+                    j = i + 1
+                    while j < n and s[j] in ' \t\r\n':
+                        j += 1
+                    after = s[j] if j < n else ''
+                    if after in (',', '}', ']', ':'):
+                        out.append(ch)
+                        in_string = False
+                    else:
+                        out += ['\\', ch]
+            else:
+                out.append(ch)
+        else:
+            if ch == '"':
+                out.append(ch)
+                in_string = True
+            else:
+                out.append(ch)
+        i += 1
+    return ''.join(out)
 # Ведущий ноль в float без дробной части — тоже идентификатор (0123.txt не сюда,
 # но '00.5' → строка): float coerce только если нет ведущего 0 у целой части >1 цифры.
 _FLOAT_LEADING_ZERO = re.compile(r"[+-]?0\d")
@@ -197,7 +257,7 @@ class JSONConverter:
                 surplus = len(row) - len(fieldnames)
                 return [delimiter.join(row[: surplus + 1])] + row[surplus + 1:]
             return row
-        # Строим payload: пробуем две стратегии сборки.
+        # Строим payload: пробуем стратегии сборки.
         # Стратегия A (простой join): работает когда рвануло только из-за запятой
         #   в ведущей колонке, а сам payload не расщеплён (v0.8.4-кейс).
         payload_a = delimiter.join(row[jstart:])
@@ -214,9 +274,17 @@ class JSONConverter:
             payload_b = row[jstart] + delimiter + tail_b
         else:
             payload_b = None
+        # Стратегия C (bare-quote repair): LogZilla-экспорт иногда кладёт в JSON-поля
+        #   значения с буквальными `"` (напр. в error-message или url), которые
+        #   не экранированы ни в JSON (`\"`), ни в CSV (`""`). csv.reader закрывает
+        #   quoted-ячейку на них, стратегия B восстанавливает хвост, но сам payload
+        #   содержит голые `"` внутри JSON-строк → json.loads падает. Пробуем
+        #   доэкранировать: идём посимвольно, внутри JSON-строки голый `"` →`\"`.
+        payload_b_fixed = _fix_bare_quotes_in_json(payload_b) if payload_b else None
         # Выбираем первый вариант, дающий валидный JSON-объект.
         payload = next(
-            (p for p in (payload_a, payload_b) if p and self._as_json_object(p) is not None),
+            (p for p in (payload_a, payload_b, payload_b_fixed)
+             if p and self._as_json_object(p) is not None),
             payload_a,  # fallback: хотя бы не рассыпаем на col_N
         )
         prefix = row[:jstart]
