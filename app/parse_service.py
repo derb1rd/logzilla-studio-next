@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -97,6 +98,36 @@ def _record_level(record: dict) -> str | None:
             if lvl:
                 return lvl
     return None
+
+
+def _is_unexpanded_payload(v: object) -> bool:
+    """Поле — это JSON-payload, который ядро пыталось развернуть, но не смогло.
+
+    Сигнатура: строка, начинается с '{' или '[', НЕ парсится как JSON, но содержит
+    признаки JSON-структуры. После deep_expand такое поле = молчаливый частичный
+    провал разбора (битый/неэкранированный экспорт, напр. LogZilla с неэкранированными
+    '"' внутри значений). Обычные текстовые поля сюда не попадают — у них нет ведущей
+    '{'/'[' и валидной-JSON у них тоже нет, но и JSON-пунктуации (": / "," ) обычно нет.
+    """
+    if not isinstance(v, str):
+        return False
+    s = v.lstrip()
+    if not s or s[0] not in "{[":
+        return False
+    try:
+        json.loads(s)
+        return False  # на самом деле валиден — развернулся бы; не наш случай
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return '":' in s or '","' in s
+
+
+def _count_unexpanded(records: list[dict]) -> int:
+    """Сколько записей имеют ≥1 поле с неразвёрнутым JSON-payload (см. выше)."""
+    return sum(
+        1 for r in records
+        if any(_is_unexpanded_payload(v) for v in r.values())
+    )
 
 
 def _count_levels(records: list[dict]) -> tuple[int, int]:
@@ -284,6 +315,14 @@ def parse(req: ParseRequest, correlation_id: str | None = None) -> ParseResult:
     diagnostics.insert(0, Diagnostic("info", "FORMAT_DETECTED", f"Определён формат: {run.fmt}"))
     if not records:
         diagnostics.append(Diagnostic("warn", "NO_RECORDS", "Парсер не извлёк ни одной записи"))
+    unexpanded = _count_unexpanded(records)
+    if unexpanded:
+        diagnostics.append(Diagnostic(
+            "warn", "PARTIAL_EXPAND",
+            f"{unexpanded} записей содержат неразвёрнутый JSON-payload "
+            f"(битый/неэкранированный экспорт). Данные сохранены строкой, но не "
+            f"разложены по полям.",
+        ))
 
     offset, limit = req.preview.offset, req.preview.limit
     page = records[offset:offset + limit]
