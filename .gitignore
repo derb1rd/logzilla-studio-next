@@ -9,3 +9,6 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Отладочный лог (генерируется run.sh)
+logzilla_debug.log
