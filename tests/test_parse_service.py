@@ -82,22 +82,22 @@ def test_kibana_csv_warning_with_commas_quotes_parens():
     структуру (level=WARNING, читаемый текст), а не уехать в текстовый путь, где
     эвристики выдают мусор (http_status=['288','148','047'], json_snippet, raw)."""
     msg = (
-        "ВР 9584 находится в статусе error! Запрос UpdateRuleStatus(disclosure_id=9584, "
-        "calculation_id=148, org_unit='198349', rule_id=5397, step=, "
-        "reason='Расчет ВР в статусе error.', time=datetime.datetime(1970, 1, 1, 0, 0), "
+        "Задача 9584 находится в статусе error! Запрос UpdateStatus(task_id=9584, "
+        "batch_id=148, unit='198349', rule_id=5397, step=, "
+        "reason='Расчет задачи в статусе error.', time=datetime.datetime(1970, 1, 1, 0, 0), "
         "headers=None) не будет обработан."
     )
     csv_text = (
         '"@timestamp","env","message"\n'
         '"Jun 5, 2026 @ 19:51:55.288","preprod","{""level"": ""WARNING"", ""message"": ""'
-        + msg + '"", ""service_name"": ""drills""}"'
+        + msg + '"", ""service_name"": ""worker""}"'
     )
     res = parse(_inline(csv_text, expand_message=True))
     assert res.format_detected == "csv"
     rec = res.records[0]
     assert rec.get("level") == "WARNING"
     assert rec.get("message") == msg          # человеческий текст, не мусор
-    assert rec.get("service_name") == "drills"
+    assert rec.get("service_name") == "worker"
     # признаки текстового пути ОТСУТСТВУЮТ
     assert "json_snippet" not in rec and "http_status" not in rec and "raw" not in rec
 
@@ -125,11 +125,11 @@ def test_python_traceback_grouped_into_one_record():
     """Полный Python traceback (с Flask-заголовком) должен давать 1 запись,
     а не по записи на каждую строку. Поля type и message извлекаются из конца."""
     tb = (
-        "[2026-05-12 05:47:01,957] ERROR in app: Exception on /api/xml-editor/v1/schema [PUT]\n"
+        "[2026-05-12 05:47:01,957] ERROR in app: Exception on /api/editor/v1/schema [PUT]\n"
         "Traceback (most recent call last):\n"
         "  File \"/opt/application/venv/lib/python3.12/site-packages/flask/app.py\", line 1823, in full_dispatch_request\n"
         "    rv = self.dispatch_request()\n"
-        "  File \"/opt/application/venv/lib/python3.12/site-packages/audit_client/modules/mixins.py\", line 56, in build_request\n"
+        "  File \"/opt/application/venv/lib/python3.12/site-packages/ext_client/modules/mixins.py\", line 56, in build_request\n"
         "    return AuditRequest()\n"
         "TypeError: bad argument type for built-in operation"
     )
@@ -140,7 +140,7 @@ def test_python_traceback_grouped_into_one_record():
     assert rec.get("level") == "ERROR"
     assert rec.get("type") == "TypeError"
     assert rec.get("message") == "bad argument type for built-in operation"
-    assert rec.get("url") == "/api/xml-editor/v1/schema"
+    assert rec.get("url") == "/api/editor/v1/schema"
     assert rec.get("method") == "PUT"
     assert isinstance(rec.get("frames"), list) and len(rec["frames"]) >= 2
     assert "traceback" in rec
@@ -150,7 +150,7 @@ def test_python_traceback_without_header():
     """Чистый traceback без Flask-заголовка — тоже 1 запись."""
     tb = (
         "Traceback (most recent call last):\n"
-        "  File \"/opt/application/venv/lib/python3.12/site-packages/audit_client/auditors/synchronous.py\", line 24, in __exit__\n"
+        "  File \"/opt/application/venv/lib/python3.12/site-packages/ext_client/sync.py\", line 24, in __exit__\n"
         "    self.write_logs(self.messages)\n"
         "psycopg2.OperationalError: SSL connection has been closed unexpectedly"
     )
@@ -205,7 +205,7 @@ def test_exception_group_grouped():
     eg = (
         "ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)\n"
         "  + Exception Group Traceback (most recent call last):\n"
-        "  |   File \"/opt/application/src/reasoned_opinion/core/engine.py\", line 54, in __init__\n"
+        "  |   File \"/opt/application/src/core/engine.py\", line 54, in __init__\n"
         "  |     self._parser = self._pg.build()\n"
         "  | PermissionError: [Errno 13] Permission denied: '/home/reasop'\n"
         "  +------------------------------------"
