@@ -128,7 +128,11 @@ body {
 .filemeta { font-size: 11px; color: var(--accent); min-height: 14px; margin: 6px 2px; font-family: var(--mono); }
 
 /* дерево файлов сессии: каждый файл = независимый прогон, активный подсвечен */
-.file-tree { list-style: none; margin: 6px 0; padding: 0; max-height: 168px; overflow-y: auto; }
+/* flex-shrink: 0 — без этого пункт с overflow-y:auto в flex-колонке .pane-left
+   получает автоматический min-height:0 и первым схлопывается до 0px, когда
+   контенту не хватает высоты (узкий/невысокий экран), а не .pane-left начинает
+   скроллиться (у неё уже есть overflow-y:auto для этого случая). */
+.file-tree { list-style: none; margin: 6px 0; padding: 0; max-height: 168px; overflow-y: auto; flex-shrink: 0; }
 .file-row {
   display: grid; grid-template-columns: 14px 1fr auto auto auto; gap: 6px; align-items: center;
   padding: 5px 7px; border-radius: 6px; cursor: pointer; font-family: var(--mono);
@@ -287,7 +291,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline-offset
 .stream-row .r-src.empty { color: var(--subtle); }
 
 /* Source filter panel */
-.src-filters { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; }
+/* тот же flex-shrink: 0, что и у .file-tree — тоже overflow-y:auto внутри
+   flex-колонки .pane-left, иначе схлопывается по той же причине. */
+.src-filters { display: flex; flex-direction: column; gap: 4px; max-height: 200px; overflow-y: auto; flex-shrink: 0; }
 .src-tile { position: relative; display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--r-sm); cursor: pointer; font-family: var(--mono); font-size: var(--fs-sm); border: 1px solid var(--border); background: var(--surface-2); transition: border-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease); user-select: none; }
 .src-tile input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
 .src-tile:hover { border-color: var(--border-hi); }
@@ -526,6 +532,33 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
   .breadcrumb { display: none; }
   .kbd { display: none; }
   .searchbar { max-width: none; }
+}
+
+/* < 560px — телефоны: topbar переносится на 2 строки, левая панель уже,
+   а поток теряет второстепенные колонки (TIMESTAMP, SOURCE) — иначе их
+   фиксированная ширина (56+96+56+132px) не помещается и строки потока
+   наезжают друг на друга / обрезаются. */
+@media (max-width: 560px) {
+  .topbar { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
+  .brand-sub { display: none; }
+  .searchbar { order: 3; flex-basis: 100%; margin-left: 0; }
+  .status { margin-left: auto; }
+
+  .panes { grid-template-columns: 200px minmax(0, 1fr); }
+
+  .stream-head, .stream-row { grid-template-columns: 14px 34px 52px 1fr; gap: 8px; padding: 5px 10px; }
+  .stream-head .col-ts, .stream-row .r-ts,
+  .stream-head .col-src, .stream-row .r-src { display: none; }
+  .stream-head { letter-spacing: 0.4px; }
+
+  /* .file-row держал имя файла в 1fr-колонке рядом с тремя auto-колонками
+     (размер/формат, счётчик ошибок, кнопка ✕) — auto-колонки не сжимаются,
+     и на узкой панели имени не остаётся места вообще (0px, не эллипсис).
+     Прячем счётчик ошибок и ограничиваем колонку размера/формата, чтобы
+     имя файла гарантированно получало место и обрезалось многоточием. */
+  .file-row { grid-template-columns: 14px minmax(0, 1fr) minmax(0, 48px) auto; }
+  .file-row .f-err { display: none; }
+  .file-row .f-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 /* ── прогресс-бар (между main и footer) ─────────────────────── */
