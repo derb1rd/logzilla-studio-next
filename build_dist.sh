@@ -52,20 +52,11 @@ else
 fi
 
 # --- 5. Лаунчеры ----------------------------------------------------------
-cat > "$DIST/run.sh" <<'EOF'
-#!/usr/bin/env bash
-# Запуск logzilla3000. Нужен только python3 (всё остальное в vendor/).
-set -euo pipefail
-cd "$(dirname "$0")"
-PORT="${PORT:-8765}"
-HOST="${HOST:-127.0.0.1}"
-URL="http://${HOST}:${PORT}"
-echo "logzilla3000 → $URL"
-if [ "${NO_OPEN:-}" != "1" ] && command -v open >/dev/null 2>&1; then
-  ( sleep 1; open "$URL" ) &
-fi
-exec python3 -m app.server --host "$HOST" --port "$PORT"
-EOF
+# run.sh не генерируется отдельным heredoc'ом, а копируется из репозитория:
+# та же логика поиска python3/python/py -3 (см. run.sh), что и при запуске
+# из исходников — раньше heredoc дублировал старую версию и расходился с
+# исправлениями в run.sh (dev-раскладка == дистрибутив, см. заголовок скрипта).
+cp "$HERE/run.sh" "$DIST/run.sh"
 chmod +x "$DIST/run.sh"
 
 # .command — двойной клик в Finder: поднимает сервер и открывает браузер.
