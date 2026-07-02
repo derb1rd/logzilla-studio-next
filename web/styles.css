@@ -528,6 +528,23 @@ mark.hl { background: rgba(255,195,92,0.30); color: var(--text); border-radius: 
   .searchbar { max-width: none; }
 }
 
+/* < 560px — телефоны: topbar переносится на 2 строки, левая панель уже,
+   а поток теряет второстепенные колонки (TIMESTAMP, SOURCE) — иначе их
+   фиксированная ширина (56+96+56+132px) не помещается и строки потока
+   наезжают друг на друга / обрезаются. */
+@media (max-width: 560px) {
+  .topbar { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
+  .brand-sub { display: none; }
+  .searchbar { order: 3; flex-basis: 100%; margin-left: 0; }
+  .status { margin-left: auto; }
+
+  .panes { grid-template-columns: 168px minmax(0, 1fr); }
+
+  .stream-head, .stream-row { grid-template-columns: 14px 34px 52px 1fr; gap: 8px; padding: 5px 10px; }
+  .stream-head .col-ts, .stream-row .r-ts,
+  .stream-head .col-src, .stream-row .r-src { display: none; }
+}
+
 /* ── прогресс-бар (между main и footer) ─────────────────────── */
 .progress-bar {
   height: 3px; background: var(--surface-2); flex-shrink: 0; overflow: hidden;
